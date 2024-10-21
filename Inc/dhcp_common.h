@@ -6,9 +6,9 @@ extern "C" {
 #endif
 
 #include "lwip/prot/dhcp.h"
-//#include "lwip/sockets.h"
 #include "lwip/udp.h"
 #include "lwip/api.h"
+#include "string.h"
 
 #define DHCP_SERVER_PORT			67
 #define DHCP_CLIENT_PORT			68
@@ -58,13 +58,11 @@ typedef struct {
 } network_settings_t;
 
 
-uint8_t initDHCPSocket(uint8_t type);
-uint8_t deinitDHCPSocket(void);
 void fillMessage(uint8_t field, void *field_value);
 uint8_t fillOption(uint8_t offset, uint8_t opt_code, uint8_t *opt_val);
-void receive_dhcp(void);
-int send_dhcp(void);
-uint8_t initDHCPpcb(uint16_t port, udp_recv_fn dhcp_recv);
+uint8_t initDHCP(uint16_t port, udp_recv_fn dhcp_recv);
+void deinitDHCP(void);
+uint32_t generateUint32(void);
 
 #ifdef __cplusplus
 }

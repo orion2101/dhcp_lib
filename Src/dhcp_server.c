@@ -75,7 +75,7 @@ inline static uint8_t getFreeIp(void) {
 
 inline static int8_t isClient(uint8_t *mac_addr) {
 	for (int ix = 0; ix < DHCP_SERVER_MAX_CLIENTS; ix++) {
-		if (memcmp(dhcp_addr_pool[ix].mac_addr, mac_addr, MAC_ADDR_LEN) == 0)
+		if (memcmp(dhcp_addr_pool[ix].mac_addr, mac_addr, (size_t)MAC_ADDR_LEN) == 0)
 			return ix;
 	}
 
@@ -264,6 +264,6 @@ void dhcpServerReceive(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_
 }
 
 void dhcp_server_init(void) {
-	initDHCPpcb(DHCP_SERVER_PORT, dhcpServerReceive);
+	initDHCP(DHCP_SERVER_PORT, dhcpServerReceive);
 	dhcp_server_info_init();
 }

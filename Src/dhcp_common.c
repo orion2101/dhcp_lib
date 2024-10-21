@@ -1,8 +1,11 @@
 #include "dhcp_common.h"
 #include "tcpip.h"
+#include "rng.h"
+
+
+extern RNG_HandleTypeDef hrng;
 
 uint8_t dhcp_role;
-
 
 network_settings_t network_settings;
 
@@ -14,7 +17,12 @@ struct pbuf *dhcp_pbuf;
 struct dhcp_msg *dhcp_out;
 uint8_t *out_options_ptr;
 
-uint8_t initDHCPpcb(uint16_t port, udp_recv_fn dhcp_recv) {
+uint8_t initDHCP(uint16_t port, udp_recv_fn dhcp_recv) {
+	//Allocating transmit buffer
+	dhcp_pbuf = pbuf_alloc(PBUF_TRANSPORT, sizeof(struct dhcp_msg), PBUF_RAM);
+	if (dhcp_pbuf == NULL)
+		goto ret_error;
+
 	dhcp_role = (port == DHCP_SERVER_PORT) ? DHCP_SERVER : DHCP_CLIENT;
 
 	LOCK_TCPIP_CORE();
@@ -29,10 +37,6 @@ uint8_t initDHCPpcb(uint16_t port, udp_recv_fn dhcp_recv) {
 
 	udp_recv(dhcp_pcb, dhcp_recv, NULL);
 
-	dhcp_pbuf = pbuf_alloc(PBUF_TRANSPORT, sizeof(struct dhcp_msg), PBUF_RAM);
-	if (dhcp_pbuf == NULL)
-		goto ret_error;
-
 ret_success:
 	UNLOCK_TCPIP_CORE();
 	return 0;
@@ -42,8 +46,20 @@ ret_error:
 	return 1;
 }
 
+void deinitDHCP(void) {
+	LOCK_TCPIP_CORE();
+	udp_remove(dhcp_pcb);
+	pbuf_free(dhcp_pbuf);
+	UNLOCK_TCPIP_CORE();
+}
 
-inline void fillMessage(uint8_t field, void *field_value) {
+uint32_t generateUint32(void) {
+	uint32_t result = 0;
+	HAL_RNG_GenerateRandomNumber(&hrng, &result);
+	return result;
+}
+
+inline void fillMessage(uint8_t field, void *value) {
 	dhcp_out = dhcp_pbuf->payload;
 	switch (field) {
 		case DHCP_FLD_OP:
@@ -56,37 +72,43 @@ inline void fillMessage(uint8_t field, void *field_value) {
 			dhcp_out->hlen = (uint8_t)MAC_ADDR_LEN;
 		break;
 		case DHCP_FLD_HOPS:
+			dhcp_out->hops = *((uint8_t*)value);
 		break;
 		case DHCP_FLD_XID:
-			dhcp_out->xid = *((uint32_t*)field_value);
+			dhcp_out->xid = *((uint32_t*)value);
 		break;
 		case DHCP_FLD_SECS:
+			dhcp_out->secs = *((uint16_t*)value);
 		break;
 		case DHCP_FLD_FLAGS:
-			dhcp_out->flags = *((uint16_t*)field_value);
+			dhcp_out->flags = *((uint16_t*)value);
 		break;
 		case DHCP_FLD_CIADDR:
-			dhcp_out->ciaddr.addr = *((uint32_t*)field_value);
+			dhcp_out->ciaddr.addr = *((uint32_t*)value);
 		break;
 		case DHCP_FLD_YIADDR:
-			dhcp_out->yiaddr.addr = *((uint32_t*)field_value);
+			dhcp_out->yiaddr.addr = *((uint32_t*)value);
 		break;
 		case DHCP_FLD_SIADDR:
-			dhcp_out->siaddr.addr = *((uint32_t*)field_value);
+			dhcp_out->siaddr.addr = *((uint32_t*)value);
 		break;
 		case DHCP_FLD_GIADDR:
+			dhcp_out->giaddr.addr = *((uint32_t*)value);
 		break;
 		case DHCP_FLD_CHADDR:
-			memcpy(dhcp_out->chaddr, (uint8_t*)field_value, MAC_ADDR_LEN);
+			memcpy(dhcp_out->chaddr, (uint8_t*)value, MAC_ADDR_LEN);
 		break;
 		case DHCP_FLD_SNAME:
+			//TODO
 		break;
 		case DHCP_FLD_FILE:
+			//TODO
 		break;
 		case DHCP_FLD_COOKIE:
 			dhcp_out->cookie = htonl((uint32_t)DHCP_MAGIC_COOKIE);
 		break;
 		case DHCP_FLD_OPTIONS:
+			//fillOption function
 		break;
 		default: break;
 	}
