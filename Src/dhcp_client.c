@@ -350,7 +350,8 @@ void dhcpClientStart(uint8_t is_standalone, uint8_t discover_cnt) {
 //	tim_serverTimeout = xTimerCreate("serverTimeout", pdMS_TO_TICKS(DHCP_SERVER_TIMEOUT), pdTRUE, 0, serverTimeoutCallback);
 //	xTimerStart(tim_serverTimeout, portMAX_DELAY);
 
-	xTaskCreate(task_dhcpClient, "task_dhcpClient", 1024, NULL, 0, &t_dhcp_client);
+	if (xTaskCreate(task_dhcpClient, "task_dhcpClient", 1024, NULL, 0, &t_dhcp_client) != pdPASS)
+		return;
 }
 
 void dhcpClientStop(void) {

@@ -32,7 +32,8 @@ uint8_t initDHCP(uint16_t port, udp_recv_fn dhcp_recv) {
 		goto ret_error;
 
 	udp_bind_netif(dhcp_pcb, &gnetif);
-
+	ip_set_option(dhcp_pcb, SOF_BROADCAST);
+//	udp_connect(dhcp_pcb, &IP4_ADDR_ANY->addr, (uint16_t)68);
 	udp_recv(dhcp_pcb, dhcp_recv, NULL);
 
 ret_success:
@@ -48,6 +49,8 @@ void deinitDHCP(void) {
 	LOCK_TCPIP_CORE();
 	udp_remove(dhcp_pcb);
 	pbuf_free(dhcp_pbuf);
+	pbuf_free(dhcp_pbuf);
+	dhcp_pbuf = NULL;
 	UNLOCK_TCPIP_CORE();
 }
 
