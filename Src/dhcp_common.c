@@ -4,6 +4,7 @@
 
 
 extern RNG_HandleTypeDef hrng;
+extern struct netif gnetif;
 
 static uint8_t dhcp_role;
 static struct dhcp_msg *dhcp_out;
@@ -11,27 +12,26 @@ static struct dhcp_msg *dhcp_out;
 struct udp_pcb *dhcp_pcb;
 struct pbuf *dhcp_pbuf;
 
-//network_settings_t network_settings;
-//client_options_t client_options; //Options sent by server to the client
-//uint8_t *out_options_ptr;
 
 uint8_t initDHCP(uint16_t port, udp_recv_fn dhcp_recv) {
 	//Allocating transmit buffer
-	dhcp_pbuf = pbuf_alloc(PBUF_TRANSPORT, sizeof(struct dhcp_msg), PBUF_RAM);
-	if (dhcp_pbuf == NULL)
-		goto ret_error;
+	if (dhcp_pbuf == NULL) {
+		if ( (dhcp_pbuf = pbuf_alloc(PBUF_TRANSPORT, sizeof(struct dhcp_msg), PBUF_RAM)) == NULL )
+			goto ret_error;
+	}
 
 	dhcp_role = (port == DHCP_SERVER_PORT) ? DHCP_SERVER : DHCP_CLIENT;
 
 	LOCK_TCPIP_CORE();
-	if (dhcp_pcb == NULL)
-		dhcp_pcb = udp_new();
-
-	if (dhcp_pcb == NULL)
-		goto ret_error;
+	if (dhcp_pcb == NULL) {
+		if ( (dhcp_pcb = udp_new()) == NULL)
+			goto ret_error;
+	}
 
 	if (udp_bind(dhcp_pcb, IP_ADDR_ANY, port) != ERR_OK)
 		goto ret_error;
+
+	udp_bind_netif(dhcp_pcb, &gnetif);
 
 	udp_recv(dhcp_pcb, dhcp_recv, NULL);
 
@@ -114,7 +114,6 @@ inline void fillMessage(uint8_t field, void *value) {
 }
 
 inline uint8_t fillOption(uint8_t offset, uint8_t opt_code, uint8_t *opt_val) {
-//	out_options_ptr = dhcp_out->options;
 	uint8_t *options = dhcp_out->options + offset;
 	static uint8_t cnt = 0;
 

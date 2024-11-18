@@ -14,7 +14,6 @@ extern "C" {
 #define DHCP_CLIENT_PORT			68
 #define BROADCAST_FLAG				0x8000
 #define MAC_ADDR_LEN				6
-#define CLIENT_CAN_BE_SERVER 		1
 
 
 enum dhcp_role {
@@ -40,22 +39,6 @@ enum dhcp_msg_fields {
 	DHCP_FLD_COOKIE,
 	DHCP_FLD_OPTIONS
 };
-
-typedef struct {
-	uint8_t msg_type;
-	uint32_t subnet_mask;
-	uint32_t renewal_time;
-	uint32_t rebinding_time;
-	uint32_t lease_time;
-	uint32_t server_ip;
-} client_options_t;
-
-typedef struct {
-	uint32_t ip_addr;
-	uint32_t gw_addr;
-	uint32_t netmask;
-	uint8_t mac_addr[MAC_ADDR_LEN];
-} network_settings_t;
 
 
 void fillMessage(uint8_t field, void *field_value);

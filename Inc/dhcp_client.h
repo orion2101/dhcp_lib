@@ -5,7 +5,21 @@
 extern "C" {
 #endif
 
-void dhcp_client_init(void);
+enum client_states {
+	INIT = 0,
+	SELECTING,
+	REQUESTING,
+	BOUND,
+	RENEWING,
+	REBINDING,
+	REBOOTING,
+	INIT_REBOOT
+};
+
+uint8_t dhcpClientGetState(void);
+uint8_t dhcpClientGetDiscoveryTryCnt(void);
+void dhcpClientStart(uint8_t is_standalone, uint8_t discover_cnt);
+void dhcpClientStop(void);
 
 #ifdef __cplusplus
 }

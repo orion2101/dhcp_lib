@@ -1,68 +1,54 @@
+#include "projdefs.h"
+#include "ethernet.h"
 #include "dhcp_common.h"
 #include "dhcp_client.h"
 #include "rng.h"
 
 
-#define DHCP_TASK_STACK_SIZE		1024
-#define DHCP_TASK_DELAY_VAL_MS 		10
-
-#define DHCP_DISCOVER_TRIES_MIN		5
-#define DHCP_DISCOVER_TRIES_MAX		10
-#define DHCP_SERVER_TIMEOUT			2000
+#define DHCP_SERVER_TIMEOUT		2000
+#define DHCP_TRY_CNT			5
 
 
-enum client_states {
-	INIT = 0,
-	SELECTING,
-	REQUESTING,
-	BOUND,
-	RENEWING,
-	REBINDING,
-	REBOOTING,
-	INIT_REBOOT
-};
+static struct {
+	uint32_t ip_addr;
+	uint32_t gw_addr;
+	uint32_t netmask;
+	uint8_t mac_addr[MAC_ADDR_LEN];
+} network_settings;
 
-extern TaskHandle_t	t_dhcp_role_resolver;
+static struct {
+	uint8_t msg_type;
+	uint32_t subnet_mask;
+	uint32_t renewal_time;
+	uint32_t rebinding_time;
+	uint32_t lease_time;
+	uint32_t server_ip;
+} client_options;
 
 extern RNG_HandleTypeDef hrng;
 extern struct netif gnetif;
 
-
 //Defined in dhcp_common.c
-extern const uint8_t *in_options_ptr;
-extern network_settings_t network_settings;
-extern client_options_t client_options;
-extern struct dhcp_msg dhcp_in, dhcp_out;
-extern int dhcp_in_len, dhcp_out_len;
-extern uint8_t dhcp_role;
-extern struct sockaddr_in remote_sa, local_sa;
-extern socklen_t remote_sa_len;
-extern int socket_fd;
+extern struct udp_pcb *dhcp_pcb;
+extern struct pbuf *dhcp_pbuf;
 //*****************************************//
 
-static uint8_t client_can_be_server;
-static uint8_t discover_tries_cnt;
+static uint16_t dhcp_in_len, dhcp_out_len;
+static struct dhcp_msg *dhcp_in;
+static uint8_t standalone;
+static uint8_t discover_try_cnt, try_cnt = DHCP_TRY_CNT;
 static uint8_t client_state;
 static uint32_t transaction_id;
-static uint8_t listen;
-static uint32_t renew_timeout, rebind_timeout, lease_timeout, server_timeout;
-static TaskHandle_t t_dhcp_client;
+static uint32_t elapsed = 0;
+static TimerHandle_t tim_serverTimeout;
+TaskHandle_t t_dhcp_client;
 
-inline static uint8_t isServerTimeout(void) {
-	if (server_timeout >= DHCP_SERVER_TIMEOUT)
-		return 1;
-
-	return 0;
+uint8_t dhcpClientGetState(void) {
+	return client_state;
 }
 
-uint8_t getDiscoverCnt(void) {
-	return discover_tries_cnt;
-}
-
-inline static void resetDiscoverCnt(void) {
-	uint32_t random = 0;
-    HAL_RNG_GenerateRandomNumber(&hrng, &random);
-    discover_tries_cnt = (uint8_t)(random & 0x000000FF);
+uint8_t dhcpClientGetDiscoveryTryCnt(void) {
+	return discover_try_cnt;
 }
 
 inline static int sendMessage(uint32_t ip, uint8_t message_type) {
@@ -84,7 +70,7 @@ inline static int sendMessage(uint32_t ip, uint8_t message_type) {
 			if (client_state == BOUND)
 				fillMessage(DHCP_FLD_CIADDR, &network_settings.ip_addr);
 			else {
-			opt_ofst += fillOption(opt_ofst, DHCP_OPTION_REQUESTED_IP, &dhcp_in.yiaddr.addr);
+			opt_ofst += fillOption(opt_ofst, DHCP_OPTION_REQUESTED_IP, &dhcp_in->yiaddr.addr);
 			opt_ofst += fillOption(opt_ofst, DHCP_OPTION_SERVER_ID, &client_options.server_ip);
 			}
 		break;
@@ -101,32 +87,21 @@ inline static int sendMessage(uint32_t ip, uint8_t message_type) {
 	opt_ofst += fillOption(opt_ofst, DHCP_OPTION_END, NULL);
 	dhcp_out_len = DHCP_OPTIONS_OFS + opt_ofst;
 
-	remote_sa.sin_addr.s_addr = ip;
-	sent_len = send_dhcp();
+	udp_sendto(dhcp_pcb, dhcp_pbuf, &ip, DHCP_SERVER_PORT);
+	pbuf_remove_header(dhcp_pbuf, SIZEOF_ETH_HDR + IP_HLEN + UDP_HLEN);
 
 	return sent_len;
 }
 
-inline static void updateTimeout(void) {
-	renew_timeout += DHCP_TASK_DELAY_VAL_MS;
-	rebind_timeout += DHCP_TASK_DELAY_VAL_MS;
-	lease_timeout += DHCP_TASK_DELAY_VAL_MS;
-}
-
-inline static void clearTimeout(void) {
-	renew_timeout = 0;
-	rebind_timeout = 0;
-	lease_timeout = 0;
-}
-
 inline static uint8_t forUs(void) {
-	if (dhcp_in.xid != transaction_id || memcmp(dhcp_in.chaddr, network_settings.mac_addr, MAC_ADDR_LEN) != 0)
+	if (dhcp_in->xid != transaction_id || memcmp(dhcp_in->chaddr, network_settings.mac_addr, MAC_ADDR_LEN) != 0)
 		return 0;
 
 	return 1;
 }
 
 inline static void parseOptions(void) {
+	uint8_t *in_options_ptr = dhcp_in->options;
 	uint16_t length = dhcp_in_len - DHCP_OPTIONS_OFS;
 	uint16_t ofst = 0;
 	uint8_t opt_len = 0, *opt_data;
@@ -169,118 +144,56 @@ inline static void parseOptions(void) {
 
 inline static void stateManager(void) {
 
-	if (dhcp_in_len > 0 && forUs())
+	if (forUs())
 		parseOptions();
 
 	switch (client_state) {
 		case INIT:
-			if (discover_tries_cnt > 0) {
-				transaction_id += 1;
-				sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_DISCOVER);
-				client_state = SELECTING;
-				listen = 1;
-				discover_tries_cnt--;
-			} else {
-				if (client_can_be_server) {
-					deinitDHCPSocket();
-					vTaskResume(t_dhcp_role_resolver);
-					vTaskDelete(NULL);
-				} else {
-					resetDiscoverCnt();
-				}
-			}
+
 		break;
 		case SELECTING:
-			if (dhcp_in_len < 0) {
-				if (isServerTimeout()) {
-					client_state = INIT;
-					listen = 0;
-				}
-				break;
+			if (client_options.msg_type == DHCP_OFFER) {
+				client_state = REQUESTING;
+				sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_REQUEST);
 			}
-
-			if (client_options.msg_type != DHCP_OFFER) {
-				client_state = INIT;
-				listen = 0;
-				break;
-			}
-
-			sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_REQUEST);
-			client_state = REQUESTING;
-			listen = 1;
 		break;
 		case REQUESTING:
-			if (dhcp_in_len < 0) {
-				if (isServerTimeout()) {
-					client_state = INIT;
-					listen = 0;
-				}
-				break;
-			}
-
 			if (client_options.msg_type != DHCP_ACK) {
-				client_state = INIT;
-				listen = 0;
+				client_state = SELECTING;
+				sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_DISCOVER);
 				break;
 			}
 
-			clearTimeout();
-//			autoip_stop(&gnetif);
 			network_settings.gw_addr = 0;
-			network_settings.ip_addr = dhcp_in.yiaddr.addr;
+			network_settings.ip_addr = dhcp_in->yiaddr.addr;
 			network_settings.netmask = client_options.subnet_mask;
 			netif_set_addr(&gnetif, &network_settings.ip_addr, &network_settings.netmask, &network_settings.gw_addr);
-			resetDiscoverCnt();
-			listen = 0;
+			elapsed = 0;
 			client_state = BOUND;
 		break;
 		case BOUND:
-			updateTimeout();
-			if (renew_timeout >= client_options.renewal_time) {
-				transaction_id += 1;
-				sendMessage(client_options.server_ip, DHCP_REQUEST);
-				client_state = RENEWING;
-				listen = 1;
-			}
+
 		break;
 		case RENEWING:
-			if (dhcp_in_len > 0) {
-				if (client_options.msg_type != DHCP_ACK) {
-					memset(&client_options, 0, sizeof(client_options_t));
-					client_state = INIT;
-				} else {
-					clearTimeout();
-					client_state = BOUND;
-				}
-
-				listen = 0;
+			if (client_options.msg_type != DHCP_ACK) {
+				memset(&client_options, 0, sizeof(client_options));
+				discover_try_cnt = DHCP_TRY_CNT;
+				sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_DISCOVER);
+				client_state = SELECTING;
 			} else {
-				updateTimeout();
-				if (rebind_timeout >= client_options.rebinding_time) {
-					transaction_id += 1;
-					sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_REQUEST);
-					client_state = REBINDING;
-					listen = 1;
-				}
+				elapsed = 0;
+				client_state = BOUND;
 			}
 		break;
 		case REBINDING:
-			if (dhcp_in_len > 0) {
-				if (client_options.msg_type != DHCP_ACK) {
-					memset(&client_options, 0, sizeof(client_options_t));
-					client_state = INIT;
-				} else {
-					clearTimeout();
-					client_state = BOUND;
-				}
-
-				listen = 0;
+			if (client_options.msg_type != DHCP_ACK) {
+				memset(&client_options, 0, sizeof(client_options));
+				discover_try_cnt = DHCP_TRY_CNT;
+				sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_DISCOVER);
+				client_state = SELECTING;
 			} else {
-				updateTimeout();
-				if (lease_timeout >= client_options.lease_time) {
-					memset(&client_options, 0, sizeof(client_options_t));
-					client_state = INIT;
-				}
+				elapsed = 0;
+				client_state = BOUND;
 			}
 		break;
 		case REBOOTING:
@@ -290,31 +203,138 @@ inline static void stateManager(void) {
 
 		break;
 	}
-
 }
 
-static void dhcp_client_task(void const *args) {
+//static void serverTimeoutCallback(TimerHandle_t xTimer) {
+//	elapsed += DHCP_SERVER_TIMEOUT;
+//
+//	switch (client_state) {
+//		case SELECTING:
+//			if (discover_try_cnt > 0) {
+//				discover_try_cnt--;
+//				sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_DISCOVER);
+//			} else {
+//				if (standalone)
+//					transaction_id = generateUint32();
+//					discover_try_cnt = DHCP_TRY_CNT;
+//			}
+//		break;
+//		case REQUESTING:
+//			if (try_cnt > 0) {
+//				try_cnt--;
+//				sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_REQUEST);
+//			} else {
+//				try_cnt = DHCP_TRY_CNT;
+//				client_state = SELECTING;
+//			}
+//		break;
+//		case BOUND:
+//			if (elapsed >= client_options.renewal_time) {
+//				transaction_id += 1;
+//				sendMessage(client_options.server_ip, DHCP_REQUEST);
+//				client_state = RENEWING;
+//			}
+//		break;
+//		case RENEWING:
+//			if (elapsed >= client_options.rebinding_time) {
+//				transaction_id += 1;
+//				sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_REQUEST);
+//				client_state = REBINDING;
+//			} else {
+//				sendMessage(client_options.server_ip, DHCP_REQUEST);
+//			}
+//		break;
+//		case REBINDING:
+//			if (elapsed >= client_options.lease_time) {
+//				memset(&client_options, 0, sizeof(client_options));
+//				discover_try_cnt = DHCP_TRY_CNT;
+//				sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_DISCOVER);
+//				client_state = SELECTING;
+//			} else {
+//				sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_REQUEST);
+//			}
+//		break;
+//		default: break;
+//	}
+//}
 
-    for (;;) {
-    	if (listen == 1) {
-    		server_timeout += DHCP_TASK_DELAY_VAL_MS;
-			receive_dhcp();
-			if (dhcp_in_len > 0)
-				server_timeout = 0;
-    	}
+void task_dhcpClient(void *args) {
+	for (;;) {
+		elapsed += DHCP_SERVER_TIMEOUT;
 
-		stateManager();
-
-		vTaskDelay(DHCP_TASK_DELAY_VAL_MS);
-    }
+		switch (client_state) {
+			case SELECTING:
+				if (discover_try_cnt > 0) {
+					discover_try_cnt--;
+					sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_DISCOVER);
+				} else {
+					if (standalone) {
+						transaction_id = generateUint32();
+						discover_try_cnt = DHCP_TRY_CNT;
+					}
+				}
+			break;
+			case REQUESTING:
+				if (try_cnt > 0) {
+					try_cnt--;
+					sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_REQUEST);
+				} else {
+					try_cnt = DHCP_TRY_CNT;
+					client_state = SELECTING;
+				}
+			break;
+			case BOUND:
+				if (elapsed >= client_options.renewal_time) {
+					transaction_id += 1;
+					sendMessage(client_options.server_ip, DHCP_REQUEST);
+					client_state = RENEWING;
+				}
+			break;
+			case RENEWING:
+				if (elapsed >= client_options.rebinding_time) {
+					transaction_id += 1;
+					sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_REQUEST);
+					client_state = REBINDING;
+				} else {
+					sendMessage(client_options.server_ip, DHCP_REQUEST);
+				}
+			break;
+			case REBINDING:
+				if (elapsed >= client_options.lease_time) {
+					memset(&client_options, 0, sizeof(client_options));
+					discover_try_cnt = DHCP_TRY_CNT;
+					sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_DISCOVER);
+					client_state = SELECTING;
+				} else {
+					sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_REQUEST);
+				}
+			break;
+			default: break;
+		}
+		vTaskDelay(DHCP_SERVER_TIMEOUT);
+	}
 }
 
-void dhcp_client_init(void) {
-	dhcp_role = DHCP_CLIENT;
-	initDHCPSocket(dhcp_role);
-    client_can_be_server = CLIENT_CAN_BE_SERVER;
-    client_state = INIT;
-    resetDiscoverCnt();
+void dhcpClientReceive(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr, u16_t port) {
+//	if (xTimerIsTimerActive(tim_serverTimeout) != pdFALSE)
+//		xTimerStop(tim_serverTimeout, 0);
+	vTaskSuspend(t_dhcp_client);
+
+
+	dhcp_in = (struct dhcp_msg*)p->payload;
+	dhcp_in_len = p->tot_len;
+
+	stateManager();
+	pbuf_free(p);
+
+	vTaskResume(t_dhcp_client);
+//	xTimerStart(tim_serverTimeout, 0);
+}
+
+void dhcpClientStart(uint8_t is_standalone, uint8_t discover_cnt) {
+	initDHCP(DHCP_CLIENT_PORT, dhcpClientReceive);
+	standalone = is_standalone;
+	discover_try_cnt = discover_cnt;
 
 	//constant fields
 	fillMessage(DHCP_FLD_OP, NULL);
@@ -323,5 +343,19 @@ void dhcp_client_init(void) {
 	fillMessage(DHCP_FLD_COOKIE, NULL);
 	memcpy(network_settings.mac_addr, gnetif.hwaddr, MAC_ADDR_LEN);
 
-    xTaskCreate(dhcp_client_task, "dhcp_client", DHCP_TASK_STACK_SIZE, NULL, 0, &t_dhcp_client);
+	transaction_id = generateUint32();
+	client_state = SELECTING;
+	sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_DISCOVER);
+
+//	tim_serverTimeout = xTimerCreate("serverTimeout", pdMS_TO_TICKS(DHCP_SERVER_TIMEOUT), pdTRUE, 0, serverTimeoutCallback);
+//	xTimerStart(tim_serverTimeout, portMAX_DELAY);
+
+	xTaskCreate(task_dhcpClient, "task_dhcpClient", 1024, NULL, 0, &t_dhcp_client);
+}
+
+void dhcpClientStop(void) {
+	vTaskDelete(t_dhcp_client);
+	deinitDHCP();
+//	xTimerStop(tim_serverTimeout, portMAX_DELAY);
+//	xTimerDelete()
 }

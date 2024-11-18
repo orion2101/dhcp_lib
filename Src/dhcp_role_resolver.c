@@ -4,6 +4,7 @@
 #include "task.h"
 #include "rng.h"
 #include "dhcp_server.h"
+#include "dhcp_client.h"
 
 extern RNG_HandleTypeDef hrng;
 extern struct netif gnetif;
@@ -22,20 +23,12 @@ static uint8_t getRandomInRange(uint8_t from, uint8_t to) {
 }
 
 void dhcp_role_resolver_task(void *args) {
-	struct dhcp *dhcp = netif_dhcp_data(&gnetif);
 	uint8_t dhcp_tries = getRandomInRange(1, 11);
+	dhcpClientStart(0, dhcp_tries);
 
 	for (;;) {
-		// On lwip init, if the NETIF_FLAG_UP flag is not set, lwip doesn't allocate DHCP data and, as a result, the task will not be able to configure the device as either a client or a server.\
-			Note that NETIF_FLAG_UP flag is set when NETIF_FLAG_LINK_UP flag is set.
-
-		if ((gnetif.flags & NETIF_FLAG_LINK_UP) && dhcp == NULL) {
-			dhcp_start(&gnetif);
-			dhcp = netif_dhcp_data(&gnetif);
-		}
-
-		if (dhcp->state == DHCP_STATE_SELECTING && dhcp->tries >= dhcp_tries) {
-			dhcp_release_and_stop(&gnetif);
+		if (dhcpClientGetState() == SELECTING && dhcpClientGetDiscoveryTryCnt() == 0) {
+			dhcpClientStop();
 			dhcp_server_init();
 			vTaskDelete(NULL);
 		}
