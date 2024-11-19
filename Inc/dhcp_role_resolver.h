@@ -5,7 +5,7 @@
 extern "C" {
 #endif
 
-void dhcp_role_resolver(void);
+void dhcpRoleResolverStart(void);
 
 #ifdef __cplusplus
 }

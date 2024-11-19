@@ -40,7 +40,6 @@ static uint8_t discover_try_cnt, try_cnt = DHCP_TRY_CNT;
 static uint8_t client_state;
 static uint32_t transaction_id;
 static uint32_t elapsed = 0;
-static TimerHandle_t tim_serverTimeout;
 TaskHandle_t t_dhcp_client;
 
 uint8_t dhcpClientGetState(void) {
@@ -88,7 +87,7 @@ inline static int sendMessage(uint32_t ip, uint8_t message_type) {
 	dhcp_out_len = DHCP_OPTIONS_OFS + opt_ofst;
 
 	udp_sendto(dhcp_pcb, dhcp_pbuf, &ip, DHCP_SERVER_PORT);
-	pbuf_remove_header(dhcp_pbuf, SIZEOF_ETH_HDR + IP_HLEN + UDP_HLEN);
+//	pbuf_remove_header(dhcp_pbuf, SIZEOF_ETH_HDR + IP_HLEN + UDP_HLEN);
 
 	return sent_len;
 }
@@ -205,59 +204,6 @@ inline static void stateManager(void) {
 	}
 }
 
-//static void serverTimeoutCallback(TimerHandle_t xTimer) {
-//	elapsed += DHCP_SERVER_TIMEOUT;
-//
-//	switch (client_state) {
-//		case SELECTING:
-//			if (discover_try_cnt > 0) {
-//				discover_try_cnt--;
-//				sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_DISCOVER);
-//			} else {
-//				if (standalone)
-//					transaction_id = generateUint32();
-//					discover_try_cnt = DHCP_TRY_CNT;
-//			}
-//		break;
-//		case REQUESTING:
-//			if (try_cnt > 0) {
-//				try_cnt--;
-//				sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_REQUEST);
-//			} else {
-//				try_cnt = DHCP_TRY_CNT;
-//				client_state = SELECTING;
-//			}
-//		break;
-//		case BOUND:
-//			if (elapsed >= client_options.renewal_time) {
-//				transaction_id += 1;
-//				sendMessage(client_options.server_ip, DHCP_REQUEST);
-//				client_state = RENEWING;
-//			}
-//		break;
-//		case RENEWING:
-//			if (elapsed >= client_options.rebinding_time) {
-//				transaction_id += 1;
-//				sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_REQUEST);
-//				client_state = REBINDING;
-//			} else {
-//				sendMessage(client_options.server_ip, DHCP_REQUEST);
-//			}
-//		break;
-//		case REBINDING:
-//			if (elapsed >= client_options.lease_time) {
-//				memset(&client_options, 0, sizeof(client_options));
-//				discover_try_cnt = DHCP_TRY_CNT;
-//				sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_DISCOVER);
-//				client_state = SELECTING;
-//			} else {
-//				sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_REQUEST);
-//			}
-//		break;
-//		default: break;
-//	}
-//}
-
 void task_dhcpClient(void *args) {
 	for (;;) {
 		elapsed += DHCP_SERVER_TIMEOUT;
@@ -316,19 +262,14 @@ void task_dhcpClient(void *args) {
 }
 
 void dhcpClientReceive(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr, u16_t port) {
-//	if (xTimerIsTimerActive(tim_serverTimeout) != pdFALSE)
-//		xTimerStop(tim_serverTimeout, 0);
 	vTaskSuspend(t_dhcp_client);
-
 
 	dhcp_in = (struct dhcp_msg*)p->payload;
 	dhcp_in_len = p->tot_len;
-
 	stateManager();
 	pbuf_free(p);
 
 	vTaskResume(t_dhcp_client);
-//	xTimerStart(tim_serverTimeout, 0);
 }
 
 void dhcpClientStart(uint8_t is_standalone, uint8_t discover_cnt) {
@@ -347,9 +288,6 @@ void dhcpClientStart(uint8_t is_standalone, uint8_t discover_cnt) {
 	client_state = SELECTING;
 	sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_DISCOVER);
 
-//	tim_serverTimeout = xTimerCreate("serverTimeout", pdMS_TO_TICKS(DHCP_SERVER_TIMEOUT), pdTRUE, 0, serverTimeoutCallback);
-//	xTimerStart(tim_serverTimeout, portMAX_DELAY);
-
 	if (xTaskCreate(task_dhcpClient, "task_dhcpClient", 1024, NULL, 0, &t_dhcp_client) != pdPASS)
 		return;
 }
@@ -357,6 +295,4 @@ void dhcpClientStart(uint8_t is_standalone, uint8_t discover_cnt) {
 void dhcpClientStop(void) {
 	vTaskDelete(t_dhcp_client);
 	deinitDHCP();
-//	xTimerStop(tim_serverTimeout, portMAX_DELAY);
-//	xTimerDelete()
 }

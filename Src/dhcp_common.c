@@ -3,11 +3,14 @@
 #include "rng.h"
 
 
+#define DHCP_OUT_BUFF_LEN	LWIP_MEM_ALIGN_SIZE(DHCP_OPTIONS_OFS + DHCP_OPTIONS_LEN)
+
 extern RNG_HandleTypeDef hrng;
 extern struct netif gnetif;
 
 static uint8_t dhcp_role;
 static struct dhcp_msg *dhcp_out;
+static uint8_t dhcp_out_buff[DHCP_OUT_BUFF_LEN];
 
 struct udp_pcb *dhcp_pcb;
 struct pbuf *dhcp_pbuf;
@@ -16,7 +19,7 @@ struct pbuf *dhcp_pbuf;
 uint8_t initDHCP(uint16_t port, udp_recv_fn dhcp_recv) {
 	//Allocating transmit buffer
 	if (dhcp_pbuf == NULL) {
-		if ( (dhcp_pbuf = pbuf_alloc(PBUF_TRANSPORT, sizeof(struct dhcp_msg), PBUF_RAM)) == NULL )
+		if ( (dhcp_pbuf = pbuf_alloc_reference((void *)dhcp_out_buff, DHCP_OUT_BUFF_LEN, PBUF_ROM)) == NULL )
 			goto ret_error;
 	}
 
@@ -33,7 +36,6 @@ uint8_t initDHCP(uint16_t port, udp_recv_fn dhcp_recv) {
 
 	udp_bind_netif(dhcp_pcb, &gnetif);
 	ip_set_option(dhcp_pcb, SOF_BROADCAST);
-//	udp_connect(dhcp_pcb, &IP4_ADDR_ANY->addr, (uint16_t)68);
 	udp_recv(dhcp_pcb, dhcp_recv, NULL);
 
 ret_success:
@@ -48,9 +50,8 @@ ret_error:
 void deinitDHCP(void) {
 	LOCK_TCPIP_CORE();
 	udp_remove(dhcp_pcb);
+	dhcp_pcb = NULL;
 	pbuf_free(dhcp_pbuf);
-	pbuf_free(dhcp_pbuf);
-	dhcp_pbuf = NULL;
 	UNLOCK_TCPIP_CORE();
 }
 

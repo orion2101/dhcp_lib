@@ -8,7 +8,7 @@
 
 extern RNG_HandleTypeDef hrng;
 extern struct netif gnetif;
-static TaskHandle_t t_dhcp_role_resolver;
+static TaskHandle_t t_dhcpRoleResolver;
 
 static uint8_t getRandomInRange(uint8_t from, uint8_t to) {
 	uint32_t random = 0;
@@ -22,14 +22,14 @@ static uint8_t getRandomInRange(uint8_t from, uint8_t to) {
 	return *result;
 }
 
-void dhcp_role_resolver_task(void *args) {
+static void task_dhcpRoleResolver(void *args) {
 	uint8_t dhcp_tries = getRandomInRange(1, 11);
 	dhcpClientStart(0, dhcp_tries);
 
 	for (;;) {
 		if (dhcpClientGetState() == SELECTING && dhcpClientGetDiscoveryTryCnt() == 0) {
 			dhcpClientStop();
-			dhcp_server_init();
+			dhcpServerStart();
 			vTaskDelete(NULL);
 		}
 
@@ -37,6 +37,6 @@ void dhcp_role_resolver_task(void *args) {
 	}
 }
 
-void dhcp_role_resolver(void) {
-	xTaskCreate(dhcp_role_resolver_task, "dhcp_role_resolver", 256, NULL, 0, &t_dhcp_role_resolver);
+void dhcpRoleResolverStart(void) {
+	xTaskCreate(task_dhcpRoleResolver, "dhcpRoleResolver", 256, NULL, 0, &t_dhcpRoleResolver);
 }

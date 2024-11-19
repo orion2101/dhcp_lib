@@ -104,8 +104,8 @@ inline static int sendMessage(uint32_t ip, uint8_t message_type) {
 	opt_ofst += fillOption(opt_ofst, DHCP_OPTION_END, NULL);
 	dhcp_out_len = DHCP_OPTIONS_OFS + opt_ofst;
 
-	udp_sendto(dhcp_pcb, dhcp_pbuf, &ip, DHCP_CLIENT_PORT);
-	pbuf_remove_header(dhcp_pbuf, SIZEOF_ETH_HDR + IP_HLEN + UDP_HLEN);
+	udp_sendto(dhcp_pcb, dhcp_pbuf, (ip_addr_t*)&ip, DHCP_CLIENT_PORT);
+//	pbuf_remove_header(dhcp_pbuf, SIZEOF_ETH_HDR + IP_HLEN + UDP_HLEN);
 
 	return sent_len;
 }
@@ -160,14 +160,21 @@ inline static void handleMessage(void) {
 					offer_ip = dhcp_addr_pool[pool_item].ip_addr;
 				}
 			}
+			else {
+				if ((pool_item = getFreeIp()) != -1) {
+					dhcp_addr_pool[pool_item].state = OFFERED;
+					offer_ip = dhcp_addr_pool[pool_item].ip_addr;
+				}
+				else break;
+			}
 
 			//If no IP was offered on previous check and free addresses are available
-			if ( (offer_ip == 0) && (addr_cnt > 0) ) {
-				pool_item = getFreeIp();
-				dhcp_addr_pool[pool_item].state = OFFERED;
-				offer_ip = dhcp_addr_pool[pool_item].ip_addr;
-
-			} else if (addr_cnt == 0) break;
+//			if ( (offer_ip == 0) && (addr_cnt > 0) ) {
+//				pool_item = getFreeIp();
+//				dhcp_addr_pool[pool_item].state = OFFERED;
+//				offer_ip = dhcp_addr_pool[pool_item].ip_addr;
+//
+//			} else if (addr_cnt == 0) break;
 
 			sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_OFFER);
 
@@ -223,7 +230,7 @@ inline static void handleMessage(void) {
 	}
 }
 
-inline static void dhcp_server_info_init(void) {
+inline static void dhcpServerInit(void) {
 	dhcp_server_info.ip_addr = DHCP_NETWORK_IP;
 	dhcp_server_info.netmask = DHCP_NETWORK_NETMASK;
 	dhcp_server_info.gw_addr = DHCP_NETWORK_GATEWAY;
@@ -245,7 +252,7 @@ inline static void dhcp_server_info_init(void) {
 	dhcp_server_info.ip_addr = htonl(dhcp_server_info.ip_addr);
 	dhcp_server_info.netmask = htonl(dhcp_server_info.netmask);
 	dhcp_server_info.gw_addr = htonl(dhcp_server_info.gw_addr);
-	netif_set_addr(&gnetif, &dhcp_server_info.ip_addr, &dhcp_server_info.netmask, &dhcp_server_info.gw_addr);
+	netif_set_addr(&gnetif, (ip4_addr_t*)&dhcp_server_info.ip_addr, (ip4_addr_t*)&dhcp_server_info.netmask, (ip4_addr_t*)&dhcp_server_info.gw_addr);
 
 	//Constant fields
 	fillMessage(DHCP_FLD_OP, NULL);
@@ -263,7 +270,7 @@ void dhcpServerReceive(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_
 	pbuf_free(p);
 }
 
-void dhcp_server_init(void) {
+void dhcpServerStart(void) {
 	initDHCP(DHCP_SERVER_PORT, dhcpServerReceive);
-	dhcp_server_info_init();
+	dhcpServerInit();
 }

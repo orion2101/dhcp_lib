@@ -5,7 +5,7 @@
 extern "C" {
 #endif
 
-void dhcp_server_init(void);
+void dhcpServerStart(void);
 
 #ifdef __cplusplus
 }
