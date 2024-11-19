@@ -1,8 +1,6 @@
-#include "lwip/dhcp.h"
-#include "lwip/prot/dhcp.h"
+#include "rng.h"
 #include "FreeRTOS.h"
 #include "task.h"
-#include "rng.h"
 #include "dhcp_server.h"
 #include "dhcp_client.h"
 
@@ -33,7 +31,7 @@ static void task_dhcpRoleResolver(void *args) {
 			vTaskDelete(NULL);
 		}
 
-		vTaskDelay(1000);
+		vTaskDelay(2000);
 	}
 }
 

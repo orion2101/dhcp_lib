@@ -4,10 +4,8 @@
 #include "dhcp_client.h"
 #include "rng.h"
 
-
-#define DHCP_SERVER_TIMEOUT		2000
-#define DHCP_TRY_CNT			5
-
+#define DHCP_RESPONSE_TIMEOUT		2000
+#define DHCP_TRY_CNT				5
 
 static struct {
 	uint32_t ip_addr;
@@ -31,6 +29,7 @@ extern struct netif gnetif;
 //Defined in dhcp_common.c
 extern struct udp_pcb *dhcp_pcb;
 extern struct pbuf *dhcp_pbuf;
+extern uint8_t dhcp_in_buff[DHCP_OUT_BUFF_LEN];
 //*****************************************//
 
 static uint16_t dhcp_in_len, dhcp_out_len;
@@ -206,7 +205,7 @@ inline static void stateManager(void) {
 
 void task_dhcpClient(void *args) {
 	for (;;) {
-		elapsed += DHCP_SERVER_TIMEOUT;
+		elapsed += DHCP_RESPONSE_TIMEOUT;
 
 		switch (client_state) {
 			case SELECTING:
@@ -257,7 +256,8 @@ void task_dhcpClient(void *args) {
 			break;
 			default: break;
 		}
-		vTaskDelay(DHCP_SERVER_TIMEOUT);
+
+		vTaskDelay(DHCP_RESPONSE_TIMEOUT);
 	}
 }
 

@@ -15,6 +15,8 @@ extern "C" {
 #define BROADCAST_FLAG				0x8000
 #define MAC_ADDR_LEN				6
 
+#define DHCP_OUT_BUFF_LEN	LWIP_MEM_ALIGN_SIZE(DHCP_OPTIONS_OFS + DHCP_OPTIONS_LEN)
+
 
 enum dhcp_role {
 	DHCP_CLIENT = 0,

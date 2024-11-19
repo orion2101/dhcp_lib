@@ -11,7 +11,7 @@
 #define DHCP_NETWORK_GATEWAY		LWIP_MAKEU32(0, 0, 0, 0)
 
 //DHCP_LEASE_TIME > DHCP_REBIND_TIME > DHCP_RENEW_TIME
-#define DHCP_LEASE_TIME				0x96000000UL
+#define DHCP_LEASE_TIME				0x96000000UL //150
 #define DHCP_REBIND_TIME			0x78000000UL //120
 #define DHCP_RENEW_TIME				0x3C000000UL //60
 
@@ -46,6 +46,7 @@ extern struct netif gnetif;
 //Defined in dhcp_common.c
 extern struct udp_pcb *dhcp_pcb;
 extern struct pbuf *dhcp_pbuf;
+extern uint8_t dhcp_in_buff[DHCP_OUT_BUFF_LEN];
 //*****************************************//
 
 static uint32_t network_ip, network_ip_min, network_broadcast;
@@ -53,6 +54,8 @@ static uint8_t addr_cnt = DHCP_SERVER_MAX_CLIENTS;
 static uint32_t offer_ip = 0;
 static uint16_t dhcp_in_len, dhcp_out_len;
 static struct dhcp_msg *dhcp_in;
+static TaskHandle_t t_dhcp_server;
+static SemaphoreHandle_t s_dhcp_in_buff;
 
 
 inline static int8_t getPoolItemByIP(uint32_t ip_addr) {
@@ -165,6 +168,7 @@ inline static void handleMessage(void) {
 					dhcp_addr_pool[pool_item].state = OFFERED;
 					offer_ip = dhcp_addr_pool[pool_item].ip_addr;
 				}
+				// No free address
 				else break;
 			}
 
@@ -264,13 +268,35 @@ inline static void dhcpServerInit(void) {
 void dhcpServerReceive(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr, u16_t port) {
 	dhcp_in = (struct dhcp_msg*)p->payload;
 	dhcp_in_len = p->tot_len;
+//	if (xSemaphoreTake(s_dhcp_in_buff, pdMS_TO_TICKS(50)) == pdTRUE) {
+//		pbuf_copy_partial(p, (void*)dhcp_in_buff, dhcp_in_len, 0);
+//		xSemaphoreGive(s_dhcp_in_buff);
+//	}
 
 	handleMessage();
 
 	pbuf_free(p);
 }
 
+static void task_dhcpServer(void *args) {
+	if ( (s_dhcp_in_buff = xSemaphoreCreateBinary()) == NULL)
+		vTaskDelete(NULL);
+
+	xSemaphoreGive(s_dhcp_in_buff);
+
+	for (;;) {
+		xSemaphoreTake(s_dhcp_in_buff, portMAX_DELAY);
+		dhcp_in = (struct dhcp_msg*)dhcp_in_buff;
+		handleMessage();
+		xSemaphoreGive(s_dhcp_in_buff);
+
+		vTaskDelay(2000);
+	}
+}
+
 void dhcpServerStart(void) {
 	initDHCP(DHCP_SERVER_PORT, dhcpServerReceive);
 	dhcpServerInit();
+//	if (xTaskCreate(task_dhcpServer, "task_dhcpServer", 1024, NULL, 0, &t_dhcp_server) != pdPASS)
+//		return;
 }

@@ -1,9 +1,7 @@
-#include "dhcp_common.h"
-#include "tcpip.h"
 #include "rng.h"
+#include "tcpip.h"
+#include "dhcp_common.h"
 
-
-#define DHCP_OUT_BUFF_LEN	LWIP_MEM_ALIGN_SIZE(DHCP_OPTIONS_OFS + DHCP_OPTIONS_LEN)
 
 extern RNG_HandleTypeDef hrng;
 extern struct netif gnetif;
@@ -11,6 +9,7 @@ extern struct netif gnetif;
 static uint8_t dhcp_role;
 static struct dhcp_msg *dhcp_out;
 static uint8_t dhcp_out_buff[DHCP_OUT_BUFF_LEN];
+uint8_t dhcp_in_buff[DHCP_OUT_BUFF_LEN];
 
 struct udp_pcb *dhcp_pcb;
 struct pbuf *dhcp_pbuf;
@@ -27,7 +26,7 @@ uint8_t initDHCP(uint16_t port, udp_recv_fn dhcp_recv) {
 
 	LOCK_TCPIP_CORE();
 	if (dhcp_pcb == NULL) {
-		if ( (dhcp_pcb = udp_new()) == NULL)
+		if ( (dhcp_pcb = udp_new()) == NULL )
 			goto ret_error;
 	}
 
