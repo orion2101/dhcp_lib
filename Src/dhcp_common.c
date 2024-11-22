@@ -9,7 +9,6 @@ extern struct netif gnetif;
 static uint8_t dhcp_role;
 static struct dhcp_msg *dhcp_out;
 static uint8_t dhcp_out_buff[DHCP_OUT_BUFF_LEN];
-uint8_t dhcp_in_buff[DHCP_OUT_BUFF_LEN];
 
 struct udp_pcb *dhcp_pcb;
 struct pbuf *dhcp_pbuf;

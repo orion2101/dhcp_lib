@@ -17,6 +17,11 @@ extern "C" {
 
 #define DHCP_OUT_BUFF_LEN	LWIP_MEM_ALIGN_SIZE(DHCP_OPTIONS_OFS + DHCP_OPTIONS_LEN)
 
+typedef struct {
+	uint16_t length;
+	uint32_t src;
+	struct dhcp_msg input;
+} DHCP_input_t;
 
 enum dhcp_role {
 	DHCP_CLIENT = 0,

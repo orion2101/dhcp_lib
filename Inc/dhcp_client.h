@@ -6,6 +6,7 @@ extern "C" {
 #endif
 
 enum client_states {
+	UNDEFINED = -1,
 	INIT = 0,
 	SELECTING,
 	REQUESTING,
@@ -16,8 +17,12 @@ enum client_states {
 	INIT_REBOOT
 };
 
-uint8_t dhcpClientGetState(void);
-uint8_t dhcpClientGetDiscoveryTryCnt(void);
+typedef struct {
+	int8_t state;
+	uint8_t discover_cnt;
+} DHCP_client_info;
+
+DHCP_client_info dhcpClientGetInfo(void);
 void dhcpClientStart(uint8_t is_standalone, uint8_t discover_cnt);
 void dhcpClientStop(void);
 

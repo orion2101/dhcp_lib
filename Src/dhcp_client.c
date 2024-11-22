@@ -29,7 +29,6 @@ extern struct netif gnetif;
 //Defined in dhcp_common.c
 extern struct udp_pcb *dhcp_pcb;
 extern struct pbuf *dhcp_pbuf;
-extern uint8_t dhcp_in_buff[DHCP_OUT_BUFF_LEN];
 //*****************************************//
 
 static uint16_t dhcp_in_len, dhcp_out_len;
@@ -39,14 +38,19 @@ static uint8_t discover_try_cnt, try_cnt = DHCP_TRY_CNT;
 static uint8_t client_state;
 static uint32_t transaction_id;
 static uint32_t elapsed = 0;
-TaskHandle_t t_dhcp_client;
+static TaskHandle_t t_dhcp_client;
+static SemaphoreHandle_t s_client_info;
 
-uint8_t dhcpClientGetState(void) {
-	return client_state;
-}
+DHCP_client_info dhcpClientGetInfo(void) {
+	if (xSemaphoreTake(s_client_info, 0) != pdTRUE)
+		return (DHCP_client_info){UNDEFINED, 1};
 
-uint8_t dhcpClientGetDiscoveryTryCnt(void) {
-	return discover_try_cnt;
+	DHCP_client_info info;
+	info.state = client_state;
+	info.discover_cnt = discover_try_cnt;
+	xSemaphoreGive(s_client_info);
+
+	return info;
 }
 
 inline static int sendMessage(uint32_t ip, uint8_t message_type) {
@@ -176,8 +180,8 @@ inline static void stateManager(void) {
 			if (client_options.msg_type != DHCP_ACK) {
 				memset(&client_options, 0, sizeof(client_options));
 				discover_try_cnt = DHCP_TRY_CNT;
-				sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_DISCOVER);
 				client_state = SELECTING;
+				sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_DISCOVER);
 			} else {
 				elapsed = 0;
 				client_state = BOUND;
@@ -187,8 +191,8 @@ inline static void stateManager(void) {
 			if (client_options.msg_type != DHCP_ACK) {
 				memset(&client_options, 0, sizeof(client_options));
 				discover_try_cnt = DHCP_TRY_CNT;
-				sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_DISCOVER);
 				client_state = SELECTING;
+				sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_DISCOVER);
 			} else {
 				elapsed = 0;
 				client_state = BOUND;
@@ -207,7 +211,15 @@ void task_dhcpClient(void *args) {
 	for (;;) {
 		elapsed += DHCP_RESPONSE_TIMEOUT;
 
+		if (xSemaphoreTake(s_client_info, 0) != pdTRUE)
+			continue;
+
 		switch (client_state) {
+			case INIT:
+				transaction_id = generateUint32();
+				sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_DISCOVER);
+				client_state = SELECTING;
+			break;
 			case SELECTING:
 				if (discover_try_cnt > 0) {
 					discover_try_cnt--;
@@ -231,15 +243,15 @@ void task_dhcpClient(void *args) {
 			case BOUND:
 				if (elapsed >= client_options.renewal_time) {
 					transaction_id += 1;
-					sendMessage(client_options.server_ip, DHCP_REQUEST);
 					client_state = RENEWING;
+					sendMessage(client_options.server_ip, DHCP_REQUEST);
 				}
 			break;
 			case RENEWING:
 				if (elapsed >= client_options.rebinding_time) {
 					transaction_id += 1;
-					sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_REQUEST);
 					client_state = REBINDING;
+					sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_REQUEST);
 				} else {
 					sendMessage(client_options.server_ip, DHCP_REQUEST);
 				}
@@ -248,8 +260,8 @@ void task_dhcpClient(void *args) {
 				if (elapsed >= client_options.lease_time) {
 					memset(&client_options, 0, sizeof(client_options));
 					discover_try_cnt = DHCP_TRY_CNT;
-					sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_DISCOVER);
 					client_state = SELECTING;
+					sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_DISCOVER);
 				} else {
 					sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_REQUEST);
 				}
@@ -257,7 +269,8 @@ void task_dhcpClient(void *args) {
 			default: break;
 		}
 
-		vTaskDelay(DHCP_RESPONSE_TIMEOUT);
+		xSemaphoreGive(s_client_info);
+		vTaskDelay(pdMS_TO_TICKS(DHCP_RESPONSE_TIMEOUT));
 	}
 }
 
@@ -266,9 +279,12 @@ void dhcpClientReceive(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_
 
 	dhcp_in = (struct dhcp_msg*)p->payload;
 	dhcp_in_len = p->tot_len;
-	stateManager();
+	if (xSemaphoreTake(s_client_info, 0) == pdTRUE)
+		stateManager();
+
 	pbuf_free(p);
 
+	xSemaphoreGive(s_client_info);
 	vTaskResume(t_dhcp_client);
 }
 
@@ -284,10 +300,12 @@ void dhcpClientStart(uint8_t is_standalone, uint8_t discover_cnt) {
 	fillMessage(DHCP_FLD_COOKIE, NULL);
 	memcpy(network_settings.mac_addr, gnetif.hwaddr, MAC_ADDR_LEN);
 
-	transaction_id = generateUint32();
-	client_state = SELECTING;
-	sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_DISCOVER);
+	if ( (s_client_info = xSemaphoreCreateBinary()) == NULL )
+		return;
 
+	xSemaphoreGive(s_client_info);
+
+	client_state = INIT;
 	if (xTaskCreate(task_dhcpClient, "task_dhcpClient", 1024, NULL, 0, &t_dhcp_client) != pdPASS)
 		return;
 }

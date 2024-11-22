@@ -22,10 +22,12 @@ static uint8_t getRandomInRange(uint8_t from, uint8_t to) {
 
 static void task_dhcpRoleResolver(void *args) {
 	uint8_t dhcp_tries = getRandomInRange(1, 11);
+	DHCP_client_info client_info;
 	dhcpClientStart(0, dhcp_tries);
 
 	for (;;) {
-		if (dhcpClientGetState() == SELECTING && dhcpClientGetDiscoveryTryCnt() == 0) {
+		client_info = dhcpClientGetInfo();
+		if (client_info.state == SELECTING && client_info.discover_cnt == 0) {
 			dhcpClientStop();
 			dhcpServerStart();
 			vTaskDelete(NULL);
