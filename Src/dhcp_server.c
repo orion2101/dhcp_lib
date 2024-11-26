@@ -91,21 +91,21 @@ inline static int sendMessage(uint32_t ip, uint8_t message_type) {
 	int sent_len = 0;
 	dhcp_out_len = 0;
 
-	fillMessage(DHCP_FLD_XID, &dhcp_in_buff.input.xid);
-	fillMessage(DHCP_FLD_FLAGS, (ip == IP4_ADDR_BROADCAST->addr) ? &(uint16_t){htons(BROADCAST_FLAG)} : &(uint16_t){0});
-	fillMessage(DHCP_FLD_YIADDR, &offer_ip);
-	fillMessage(DHCP_FLD_CHADDR, &dhcp_in_buff.input.chaddr);
-	opt_ofst += fillOption(opt_ofst, DHCP_OPTION_MESSAGE_TYPE, &message_type);
-	opt_ofst += fillOption(opt_ofst, DHCP_OPTION_SERVER_ID, &dhcp_server_info.ip_addr);
+	dhcpFillMessage(DHCP_FLD_XID, &dhcp_in_buff.input.xid);
+	dhcpFillMessage(DHCP_FLD_FLAGS, (ip == IP4_ADDR_BROADCAST->addr) ? &(uint16_t){htons(BROADCAST_FLAG)} : &(uint16_t){0});
+	dhcpFillMessage(DHCP_FLD_YIADDR, &offer_ip);
+	dhcpFillMessage(DHCP_FLD_CHADDR, &dhcp_in_buff.input.chaddr);
+	opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_MESSAGE_TYPE, &message_type);
+	opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_SERVER_ID, &dhcp_server_info.ip_addr);
 
 	if (message_type != DHCP_NAK) {
-		opt_ofst += fillOption(opt_ofst, DHCP_OPTION_T1, &(uint32_t){DHCP_RENEW_TIME});
-		opt_ofst += fillOption(opt_ofst, DHCP_OPTION_T2, &(uint32_t){DHCP_REBIND_TIME});
-		opt_ofst += fillOption(opt_ofst, DHCP_OPTION_LEASE_TIME, &(uint32_t){DHCP_LEASE_TIME});
-		opt_ofst += fillOption(opt_ofst, DHCP_OPTION_SUBNET_MASK, &dhcp_server_info.netmask);
+		opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_T1, &(uint32_t){DHCP_RENEW_TIME});
+		opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_T2, &(uint32_t){DHCP_REBIND_TIME});
+		opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_LEASE_TIME, &(uint32_t){DHCP_LEASE_TIME});
+		opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_SUBNET_MASK, &dhcp_server_info.netmask);
 	}
 
-	opt_ofst += fillOption(opt_ofst, DHCP_OPTION_END, NULL);
+	opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_END, NULL);
 	dhcp_out_len = DHCP_OPTIONS_OFS + opt_ofst;
 
 	udp_sendto(dhcp_pcb, dhcp_pbuf, (ip_addr_t*)&ip, DHCP_CLIENT_PORT);
@@ -260,10 +260,10 @@ inline static void dhcpServerInit(void) {
 	netif_set_addr(&gnetif, (ip4_addr_t*)&dhcp_server_info.ip_addr, (ip4_addr_t*)&dhcp_server_info.netmask, (ip4_addr_t*)&dhcp_server_info.gw_addr);
 
 	//Constant fields
-	fillMessage(DHCP_FLD_OP, NULL);
-	fillMessage(DHCP_FLD_HTYPE, NULL);
-	fillMessage(DHCP_FLD_HLEN, NULL);
-	fillMessage(DHCP_FLD_COOKIE, NULL);
+	dhcpFillMessage(DHCP_FLD_OP, NULL);
+	dhcpFillMessage(DHCP_FLD_HTYPE, NULL);
+	dhcpFillMessage(DHCP_FLD_HLEN, NULL);
+	dhcpFillMessage(DHCP_FLD_COOKIE, NULL);
 }
 
 void dhcpServerReceive(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr, u16_t port) {
@@ -295,7 +295,7 @@ void dhcpServerStart(void) {
 	if ( (q_dhcp_input = xQueueCreate(DHCP_INPUT_QUEUE_LEN, sizeof(DHCP_input_t))) == NULL )
 		return;
 
-	initDHCP(DHCP_SERVER_PORT, dhcpServerReceive);
+	dhcpInit(DHCP_SERVER_PORT, dhcpServerReceive);
 	dhcpServerInit();
 	if (xTaskCreate(task_dhcpServer, "task_dhcpServer", 1024, NULL, 0, &t_dhcp_server) != pdPASS)
 		return;

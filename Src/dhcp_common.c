@@ -13,8 +13,11 @@ static uint8_t dhcp_out_buff[DHCP_OUT_BUFF_LEN];
 struct udp_pcb *dhcp_pcb;
 struct pbuf *dhcp_pbuf;
 
+void dhcpClearOptions(void) {
+	memset(dhcp_out->options, 0, DHCP_OPTIONS_LEN);
+}
 
-uint8_t initDHCP(uint16_t port, udp_recv_fn dhcp_recv) {
+uint8_t dhcpInit(uint16_t port, udp_recv_fn dhcp_recv) {
 	//Allocating transmit buffer
 	if (dhcp_pbuf == NULL) {
 		if ( (dhcp_pbuf = pbuf_alloc_reference((void *)dhcp_out_buff, DHCP_OUT_BUFF_LEN, PBUF_ROM)) == NULL )
@@ -45,21 +48,22 @@ ret_error:
 	return 1;
 }
 
-void deinitDHCP(void) {
+void dhcpDeinit(void) {
 	LOCK_TCPIP_CORE();
 	udp_remove(dhcp_pcb);
-	dhcp_pcb = NULL;
 	pbuf_free(dhcp_pbuf);
+	dhcp_pcb = NULL;
+	dhcp_pbuf = NULL;
 	UNLOCK_TCPIP_CORE();
 }
 
-uint32_t generateUint32(void) {
+uint32_t dhcpGenerateUint32(void) {
 	uint32_t result = 0;
 	HAL_RNG_GenerateRandomNumber(&hrng, &result);
 	return result;
 }
 
-inline void fillMessage(uint8_t field, void *value) {
+inline void dhcpFillMessage(uint8_t field, void *value) {
 	dhcp_out = dhcp_pbuf->payload;
 
 	switch (field) {
@@ -115,7 +119,7 @@ inline void fillMessage(uint8_t field, void *value) {
 	}
 }
 
-inline uint8_t fillOption(uint8_t offset, uint8_t opt_code, uint8_t *opt_val) {
+inline uint8_t dhcpFillOption(uint8_t offset, uint8_t opt_code, uint8_t *opt_val) {
 	uint8_t *options = dhcp_out->options + offset;
 	static uint8_t cnt = 0;
 
