@@ -5,6 +5,8 @@
 extern "C" {
 #endif
 
+#define DHCP_RESPONSE_TIMEOUT_MS		2000 //The time slice between client status checks
+
 enum client_states {
 	UNDEFINED = -1,
 	INIT = 0,

@@ -4,7 +4,7 @@
 
 
 #define DHCP_SERVER_MAX_CLIENTS		5
-#define DHCP_INPUT_QUEUE_LEN		5
+#define DHCP_INPUT_QUEUE_LEN		DHCP_SERVER_MAX_CLIENTS
 
 //network alignment is big-endian
 #define DHCP_NETWORK_IP 			LWIP_MAKEU32(192, 168, 0, 1)
@@ -286,8 +286,6 @@ static void task_dhcpServer(void *args) {
 	for (;;) {
 		xQueueReceive(q_dhcp_input, &dhcp_in_buff, portMAX_DELAY);
 		handleMessage();
-
-//		vTaskDelay(2000);
 	}
 }
 

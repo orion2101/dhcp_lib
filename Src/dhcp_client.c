@@ -4,8 +4,8 @@
 #include "dhcp_client.h"
 #include "rng.h"
 
-#define DHCP_RESPONSE_TIMEOUT		2000
-#define DHCP_TRY_CNT				5
+#define DHCP_CLIENT_STACK_SZ		1024
+#define DHCP_TRY_CNT				5 		//The number of times the client try to make requests
 
 static struct {
 	uint32_t ip_addr;
@@ -201,7 +201,7 @@ inline static void stateManager(void) {
 
 void task_dhcpClient(void *args) {
 	for (;;) {
-		elapsed += DHCP_RESPONSE_TIMEOUT;
+		elapsed += DHCP_RESPONSE_TIMEOUT_MS;
 
 		if (xSemaphoreTake(s_client_info, 0) != pdTRUE)
 			continue;
@@ -274,7 +274,7 @@ check_state:
 		}
 
 		xSemaphoreGive(s_client_info);
-		vTaskDelay(pdMS_TO_TICKS(DHCP_RESPONSE_TIMEOUT));
+		vTaskDelay(pdMS_TO_TICKS(DHCP_RESPONSE_TIMEOUT_MS));
 	}
 }
 
@@ -306,7 +306,7 @@ void dhcpClientStart(uint8_t is_standalone, uint8_t discover_cnt) {
 	xSemaphoreGive(s_client_info);
 
 	client_state = INIT;
-	if (xTaskCreate(task_dhcpClient, "task_dhcpClient", 1024, NULL, 0, &t_dhcp_client) != pdPASS)
+	if (xTaskCreate(task_dhcpClient, "task_dhcpClient", DHCP_CLIENT_STACK_SZ, NULL, 0, &t_dhcp_client) != pdPASS)
 		return;
 }
 

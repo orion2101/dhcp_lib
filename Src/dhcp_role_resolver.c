@@ -4,6 +4,10 @@
 #include "dhcp_server.h"
 #include "dhcp_client.h"
 
+
+#define DHCP_ROLE_RESOLVER_DELAY_MS		DHCP_RESPONSE_TIMEOUT_MS
+#define DHCP_ROLE_RESOLVER_STACK_SZ		256
+
 extern RNG_HandleTypeDef hrng;
 extern struct netif gnetif;
 static TaskHandle_t t_dhcpRoleResolver;
@@ -33,10 +37,10 @@ static void task_dhcpRoleResolver(void *args) {
 			vTaskDelete(NULL);
 		}
 
-		vTaskDelay(2000);
+		vTaskDelay(pdMS_TO_TICKS(DHCP_ROLE_RESOLVER_DELAY_MS * dhcp_tries));
 	}
 }
 
 void dhcpRoleResolverStart(void) {
-	xTaskCreate(task_dhcpRoleResolver, "dhcpRoleResolver", 256, NULL, 0, &t_dhcpRoleResolver);
+	xTaskCreate(task_dhcpRoleResolver, "dhcpRoleResolver", DHCP_ROLE_RESOLVER_STACK_SZ, NULL, 0, &t_dhcpRoleResolver);
 }
