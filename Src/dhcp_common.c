@@ -13,11 +13,19 @@ static uint8_t dhcp_out_buff[DHCP_OUT_BUFF_LEN];
 struct udp_pcb *dhcp_pcb;
 struct pbuf *dhcp_pbuf;
 
+
+uint32_t dhcpGenerateUint32(void) {
+	uint32_t result = 0;
+	HAL_RNG_GenerateRandomNumber(&hrng, &result);
+	return result;
+}
+
 void dhcpClearOptions(void) {
 	memset(dhcp_out->options, 0, DHCP_OPTIONS_LEN);
 }
 
 uint8_t dhcpInit(uint16_t port, udp_recv_fn dhcp_recv) {
+	memset(dhcp_out_buff, 0, DHCP_OUT_BUFF_LEN);
 	//Allocating transmit buffer
 	if (dhcp_pbuf == NULL) {
 		if ( (dhcp_pbuf = pbuf_alloc_reference((void *)dhcp_out_buff, DHCP_OUT_BUFF_LEN, PBUF_ROM)) == NULL )
@@ -28,12 +36,20 @@ uint8_t dhcpInit(uint16_t port, udp_recv_fn dhcp_recv) {
 
 	LOCK_TCPIP_CORE();
 	if (dhcp_pcb == NULL) {
-		if ( (dhcp_pcb = udp_new()) == NULL )
+		if ( (dhcp_pcb = udp_new()) == NULL ) {
+			pbuf_free(dhcp_pbuf);
+			dhcp_pbuf = NULL;
 			goto ret_error;
+		}
 	}
 
-	if (udp_bind(dhcp_pcb, IP_ADDR_ANY, port) != ERR_OK)
+	if (udp_bind(dhcp_pcb, IP_ADDR_ANY, port) != ERR_OK) {
+		udp_remove(dhcp_pcb);
+		pbuf_free(dhcp_pbuf);
+		dhcp_pcb = NULL;
+		dhcp_pbuf = NULL;
 		goto ret_error;
+	}
 
 	udp_bind_netif(dhcp_pcb, &gnetif);
 	ip_set_option(dhcp_pcb, SOF_BROADCAST);
@@ -55,12 +71,6 @@ void dhcpDeinit(void) {
 	dhcp_pcb = NULL;
 	dhcp_pbuf = NULL;
 	UNLOCK_TCPIP_CORE();
-}
-
-uint32_t dhcpGenerateUint32(void) {
-	uint32_t result = 0;
-	HAL_RNG_GenerateRandomNumber(&hrng, &result);
-	return result;
 }
 
 inline void dhcpFillMessage(uint8_t field, void *value) {

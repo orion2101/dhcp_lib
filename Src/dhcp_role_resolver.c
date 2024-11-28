@@ -8,6 +8,9 @@
 #define DHCP_ROLE_RESOLVER_DELAY_MS		DHCP_RESPONSE_TIMEOUT_MS
 #define DHCP_ROLE_RESOLVER_STACK_SZ		256
 
+#define DHCP_TRIES_RND_MIN		1
+#define DHCP_TRIES_RND_MAX		15
+
 extern RNG_HandleTypeDef hrng;
 extern struct netif gnetif;
 static TaskHandle_t t_dhcpRoleResolver;
@@ -25,7 +28,7 @@ static uint8_t getRandomInRange(uint8_t from, uint8_t to) {
 }
 
 static void task_dhcpRoleResolver(void *args) {
-	uint8_t dhcp_tries = getRandomInRange(1, 11);
+	uint8_t dhcp_tries = getRandomInRange(DHCP_TRIES_RND_MIN, DHCP_TRIES_RND_MAX);
 	DHCP_client_info client_info;
 	dhcpClientStart(0, dhcp_tries); //client start with first parameter as 0 (managed)
 

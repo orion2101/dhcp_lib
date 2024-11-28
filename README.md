@@ -9,7 +9,8 @@ To launch the server, call dhcpServerStart. Your project need the files *dhcp_se
 To launch the client, call dhcpClientStart and pass 1 as the value for the first parameter.This means that the client is autonomous. Your project need the files *dhcp_client.h/c, dhcp_common.h/c*.
 When the host can be either a client or a server, call dhcpRoleResolverStart. The host will first try to reach a server, and after a certain number of attempts, it will set itself as a server.
 
-## Available settings 
+## Available settings
+- DHCP_TRIES_RND_MIN, DHCP_TRIES_RND_MAX: When managed, the client will try to configure it self N times (DHCP_TRIES_RND_MIN < N < DHCP_TRIES_RND_MAX). These macros are located in *dhcp_role_resolver.c*.
 - DHCP_RESPONSE_TIMEOUT_MS: The time slice between client status checks. The macro is located in *dhcp_client.h*.
 - DHCP_TRY_CNT: The number of times the client try to make requests when in REQUESTING state and SELECTING state. The later is valid when the client is autonomous. The macro is located in *dhcp_client.c*.
 - DHCP_SERVER_MAX_CLIENTS: Number of client the server can handle. The macro is located in *dhcp_server.c*.

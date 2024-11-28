@@ -7,14 +7,18 @@
 #define DHCP_INPUT_QUEUE_LEN		DHCP_SERVER_MAX_CLIENTS
 
 //network alignment is big-endian
-#define DHCP_NETWORK_IP 			LWIP_MAKEU32(192, 168, 0, 1)
-#define DHCP_NETWORK_NETMASK		LWIP_MAKEU32(255, 255, 255, 0)
-#define DHCP_NETWORK_GATEWAY		LWIP_MAKEU32(0, 0, 0, 0)
+#define DHCP_SERVER_IP 				LWIP_MAKEU32(192, 168, 0, 1)
+#define DHCP_NET_NETMASK			LWIP_MAKEU32(255, 255, 255, 0)
+#define DHCP_NET_GATEWAY			LWIP_MAKEU32(0, 0, 0, 0)
 
 //DHCP_LEASE_TIME > DHCP_REBIND_TIME > DHCP_RENEW_TIME
 #define DHCP_LEASE_TIME				0x96000000UL //150
 #define DHCP_REBIND_TIME			0x78000000UL //120
 #define DHCP_RENEW_TIME				0x3C000000UL //60
+
+#define DHCP_NET_ADDR				(DHCP_SERVER_IP & DHCP_NET_NETMASK)
+#define DHCP_NET_ADDR_MIN			(DHCP_NET_ADDR + 1)
+#define DHCP_NET_ADDR_BRD			(DHCP_NET_ADDR | ~DHCP_NET_NETMASK)
 
 
 typedef enum {
@@ -29,12 +33,12 @@ static struct {
 	uint8_t			mac_addr[MAC_ADDR_LEN];
 } dhcp_addr_pool[DHCP_SERVER_MAX_CLIENTS];
 
-static struct {
-	uint32_t ip_addr;
-	uint32_t gw_addr;
-	uint32_t netmask;
-	uint8_t mac_addr[MAC_ADDR_LEN];
-} dhcp_server_info;
+//static struct {
+//	uint32_t ip_addr;
+//	uint32_t gw_addr;
+//	uint32_t netmask;
+//	uint8_t mac_addr[MAC_ADDR_LEN];
+//} dhcp_server_info;
 
 static struct {
 	uint8_t msg_type;
@@ -49,10 +53,8 @@ extern struct udp_pcb *dhcp_pcb;
 extern struct pbuf *dhcp_pbuf;
 //*****************************************//
 
-static uint32_t network_ip, network_ip_min, network_broadcast;
 static uint8_t addr_cnt = DHCP_SERVER_MAX_CLIENTS;
 static uint32_t offer_ip = 0;
-static uint16_t dhcp_out_len;
 static DHCP_input_t udb_cb_buff, dhcp_in_buff;
 static TaskHandle_t t_dhcp_server;
 static QueueHandle_t q_dhcp_input;
@@ -86,32 +88,29 @@ inline static int8_t isClient(uint8_t *mac_addr) {
 	return -1;
 }
 
-inline static int sendMessage(uint32_t ip, uint8_t message_type) {
+inline static void sendMessage(uint32_t ip, uint8_t message_type) {
 	uint8_t opt_ofst = 0;
-	int sent_len = 0;
-	dhcp_out_len = 0;
+//	uint16_t dhcp_out_len = 0;
 
 	dhcpFillMessage(DHCP_FLD_XID, &dhcp_in_buff.input.xid);
 	dhcpFillMessage(DHCP_FLD_FLAGS, (ip == IP4_ADDR_BROADCAST->addr) ? &(uint16_t){htons(BROADCAST_FLAG)} : &(uint16_t){0});
 	dhcpFillMessage(DHCP_FLD_YIADDR, &offer_ip);
 	dhcpFillMessage(DHCP_FLD_CHADDR, &dhcp_in_buff.input.chaddr);
 	opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_MESSAGE_TYPE, &message_type);
-	opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_SERVER_ID, &dhcp_server_info.ip_addr);
+	opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_SERVER_ID, &gnetif.ip_addr);
 
 	if (message_type != DHCP_NAK) {
 		opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_T1, &(uint32_t){DHCP_RENEW_TIME});
 		opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_T2, &(uint32_t){DHCP_REBIND_TIME});
 		opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_LEASE_TIME, &(uint32_t){DHCP_LEASE_TIME});
-		opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_SUBNET_MASK, &dhcp_server_info.netmask);
+		opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_SUBNET_MASK, &gnetif.netmask);
 	}
 
 	opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_END, NULL);
-	dhcp_out_len = DHCP_OPTIONS_OFS + opt_ofst;
+//	dhcp_out_len = DHCP_OPTIONS_OFS + opt_ofst;
 
 	udp_sendto(dhcp_pcb, dhcp_pbuf, (ip_addr_t*)&ip, DHCP_CLIENT_PORT);
 //	pbuf_remove_header(dhcp_pbuf, SIZEOF_ETH_HDR + IP_HLEN + UDP_HLEN);
-
-	return sent_len;
 }
 
 inline static void parseOptions(void) {
@@ -152,36 +151,26 @@ inline static void handleMessage(void) {
 
 	switch (server_options.msg_type) {
 		case DHCP_DISCOVER:
-			pool_item = getPoolItemByIP(server_options.requested_ip);
-
 			//The requested IP was found in the pool
-			if (pool_item >= 0) {
-				uint8_t addr_state = dhcp_addr_pool[pool_item].state;
+			if ( (server_options.requested_ip != 0) && \
+					(pool_item = getPoolItemByIP(server_options.requested_ip)) >= 0 ) {
 
-				//The requested IP is free or client is the registered owner
-				if ( (addr_state == FREE) || (memcmp(dhcp_addr_pool[pool_item].mac_addr, dhcp_in_buff.input.chaddr, MAC_ADDR_LEN) == 0) ) {
-					dhcp_addr_pool[pool_item].state = OFFERED;
-					offer_ip = dhcp_addr_pool[pool_item].ip_addr;
-				}
-			}
-			else {
-				if ((pool_item = getFreeIp()) != -1) {
-					dhcp_addr_pool[pool_item].state = OFFERED;
-					offer_ip = dhcp_addr_pool[pool_item].ip_addr;
-				}
-				// No free address
-				else break;
+					//The requested IP is free or client is the registered owner
+					if ( (dhcp_addr_pool[pool_item].state == FREE) || (memcmp(dhcp_addr_pool[pool_item].mac_addr, dhcp_in_buff.input.chaddr, MAC_ADDR_LEN) == 0) ) {
+						dhcp_addr_pool[pool_item].state = OFFERED;
+						offer_ip = dhcp_addr_pool[pool_item].ip_addr;
+					}
 			}
 
 			//If no IP was offered on previous check and free addresses are available
-//			if ( (offer_ip == 0) && (addr_cnt > 0) ) {
-//				pool_item = getFreeIp();
-//				dhcp_addr_pool[pool_item].state = OFFERED;
-//				offer_ip = dhcp_addr_pool[pool_item].ip_addr;
-//
-//			} else if (addr_cnt == 0) break;
+			if ( (offer_ip == 0) && (addr_cnt > 0) ) {
+				pool_item = getFreeIp();
+				dhcp_addr_pool[pool_item].state = OFFERED;
+				offer_ip = dhcp_addr_pool[pool_item].ip_addr;
+			}
 
-			sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_OFFER);
+			if (offer_ip != 0)
+				sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_OFFER);
 
 		break;
 		case DHCP_REQUEST:
@@ -199,7 +188,6 @@ inline static void handleMessage(void) {
 					//BROADCAST_FLAG -> Client restarts and tries to validate his configuration
 					//UNICAST_FLAG -> Client tries to renew it's lease time
 					sendMessage((dhcp_in_buff.input.flags == htons(BROADCAST_FLAG)) ? IP4_ADDR_BROADCAST->addr : dhcp_in_buff.src, DHCP_ACK);
-//					sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_ACK);
 				}
 
 			//Request after an offer
@@ -235,37 +223,6 @@ inline static void handleMessage(void) {
 	}
 }
 
-inline static void dhcpServerInit(void) {
-	dhcp_server_info.ip_addr = DHCP_NETWORK_IP;
-	dhcp_server_info.netmask = DHCP_NETWORK_NETMASK;
-	dhcp_server_info.gw_addr = DHCP_NETWORK_GATEWAY;
-
-	network_ip = dhcp_server_info.ip_addr & dhcp_server_info.netmask;
-	network_ip_min = network_ip + 1;
-	network_broadcast = network_ip | ~dhcp_server_info.netmask;
-
-	uint32_t ip_addr_init = network_ip_min;
-
-	for (int ix = 0; ix < DHCP_SERVER_MAX_CLIENTS; ix++) {
-		if (ip_addr_init == dhcp_server_info.ip_addr)
-			ip_addr_init++;
-
-		dhcp_addr_pool[ix].ip_addr = htonl(ip_addr_init);
-		ip_addr_init++;
-	}
-
-	dhcp_server_info.ip_addr = htonl(dhcp_server_info.ip_addr);
-	dhcp_server_info.netmask = htonl(dhcp_server_info.netmask);
-	dhcp_server_info.gw_addr = htonl(dhcp_server_info.gw_addr);
-	netif_set_addr(&gnetif, (ip4_addr_t*)&dhcp_server_info.ip_addr, (ip4_addr_t*)&dhcp_server_info.netmask, (ip4_addr_t*)&dhcp_server_info.gw_addr);
-
-	//Constant fields
-	dhcpFillMessage(DHCP_FLD_OP, NULL);
-	dhcpFillMessage(DHCP_FLD_HTYPE, NULL);
-	dhcpFillMessage(DHCP_FLD_HLEN, NULL);
-	dhcpFillMessage(DHCP_FLD_COOKIE, NULL);
-}
-
 void dhcpServerReceive(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr, u16_t port) {
 	if (p->len != p->tot_len)
 		goto return_;
@@ -290,11 +247,33 @@ static void task_dhcpServer(void *args) {
 }
 
 void dhcpServerStart(void) {
+	uint32_t ip_addr_init = DHCP_NET_ADDR_MIN;
+
+	// DHCP pool init
+	for (int ix = 0; ix < DHCP_SERVER_MAX_CLIENTS; ix++) {
+		if (ip_addr_init == DHCP_SERVER_IP)
+			ip_addr_init++;
+
+		dhcp_addr_pool[ix].ip_addr = htonl(ip_addr_init);
+		ip_addr_init++;
+	}
+
+	netif_set_addr(&gnetif, &(ip4_addr_t){htonl(DHCP_SERVER_IP)}, &(ip4_addr_t){htonl(DHCP_NET_NETMASK)}, &(ip4_addr_t){htonl(DHCP_NET_GATEWAY)});
+
 	if ( (q_dhcp_input = xQueueCreate(DHCP_INPUT_QUEUE_LEN, sizeof(DHCP_input_t))) == NULL )
 		return;
 
-	dhcpInit(DHCP_SERVER_PORT, dhcpServerReceive);
-	dhcpServerInit();
+	if (dhcpInit(DHCP_SERVER_PORT, dhcpServerReceive) == 1) {
+		vQueueDelete(q_dhcp_input);
+		return;
+	}
+
+	//Constant fields
+	dhcpFillMessage(DHCP_FLD_OP, NULL);
+	dhcpFillMessage(DHCP_FLD_HTYPE, NULL);
+	dhcpFillMessage(DHCP_FLD_HLEN, NULL);
+	dhcpFillMessage(DHCP_FLD_COOKIE, NULL);
+
 	if (xTaskCreate(task_dhcpServer, "task_dhcpServer", 1024, NULL, 0, &t_dhcp_server) != pdPASS)
 		return;
 }

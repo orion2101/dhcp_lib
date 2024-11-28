@@ -7,6 +7,7 @@
 #define DHCP_CLIENT_STACK_SZ		1024
 #define DHCP_TRY_CNT				5 		//The number of times the client try to make requests
 
+
 static struct {
 	uint32_t ip_addr;
 	uint32_t gw_addr;
@@ -31,7 +32,7 @@ extern struct udp_pcb *dhcp_pcb;
 extern struct pbuf *dhcp_pbuf;
 //*****************************************//
 
-static uint16_t dhcp_in_len, dhcp_out_len;
+static uint16_t dhcp_in_len;
 static struct dhcp_msg *dhcp_in;
 static uint8_t standalone;
 static uint8_t discover_try_cnt, try_cnt = DHCP_TRY_CNT;
@@ -53,10 +54,10 @@ DHCP_client_info dhcpClientGetInfo(void) {
 	return info;
 }
 
-inline static int sendMessage(uint32_t ip, uint8_t message_type) {
+inline static void sendMessage(uint32_t ip, uint8_t message_type) {
 	uint8_t opt_ofst = 0;
-	int sent_len = 0;
-	dhcp_out_len = 0;
+//	int sent_len = 0;
+//	dhcp_out_len = 0;
 
 	dhcpFillMessage(DHCP_FLD_FLAGS, (ip == IP4_ADDR_BROADCAST->addr) ? &(uint16_t){htons(BROADCAST_FLAG)} : &(uint16_t){0});
 	switch (message_type) {
@@ -73,8 +74,8 @@ inline static int sendMessage(uint32_t ip, uint8_t message_type) {
 			if (client_state == BOUND || client_state == RENEWING || client_state == REBINDING)
 				dhcpFillMessage(DHCP_FLD_CIADDR, &network_settings.ip_addr);
 			else {
-				opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_REQUESTED_IP, &dhcp_in->yiaddr.addr);
-				opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_SERVER_ID, &client_options.server_ip);
+				opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_REQUESTED_IP, (uint8_t*)&dhcp_in->yiaddr.addr);
+				opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_SERVER_ID, (uint8_t*)&client_options.server_ip);
 			}
 		break;
 		case DHCP_DECLINE:
@@ -86,14 +87,12 @@ inline static int sendMessage(uint32_t ip, uint8_t message_type) {
 		case DHCP_INFORM:
 
 		break;
+		default: break;
 	}
 	opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_END, NULL);
-	dhcp_out_len = DHCP_OPTIONS_OFS + opt_ofst;
+//	dhcp_out_len = DHCP_OPTIONS_OFS + opt_ofst;
 
-	udp_sendto(dhcp_pcb, dhcp_pbuf, &ip, DHCP_SERVER_PORT);
-//	pbuf_remove_header(dhcp_pbuf, SIZEOF_ETH_HDR + IP_HLEN + UDP_HLEN);
-
-	return sent_len;
+	udp_sendto(dhcp_pcb, dhcp_pbuf, (ip_addr_t*)&ip, DHCP_SERVER_PORT);
 }
 
 inline static void parseOptions(void) {
@@ -139,10 +138,9 @@ inline static void parseOptions(void) {
 }
 
 inline static void stateManager(void) {
-	// not for us
+	// Is the incoming message a response to our request ?
 	if (dhcp_in->xid != transaction_id || memcmp(dhcp_in->chaddr, network_settings.mac_addr, MAC_ADDR_LEN) != 0)
 		return;
-	//	for us
 	else
 		parseOptions();
 
@@ -161,7 +159,7 @@ inline static void stateManager(void) {
 				network_settings.gw_addr = 0;
 				network_settings.ip_addr = dhcp_in->yiaddr.addr;
 				network_settings.netmask = client_options.subnet_mask;
-				netif_set_addr(&gnetif, &network_settings.ip_addr, &network_settings.netmask, &network_settings.gw_addr);
+				netif_set_addr(&gnetif, (ip4_addr_t*)&network_settings.ip_addr, (ip4_addr_t*)&network_settings.netmask, (ip4_addr_t*)&network_settings.gw_addr);
 				elapsed = 0;
 				client_state = BOUND;
 			}
@@ -279,33 +277,46 @@ check_state:
 }
 
 void dhcpClientReceive(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr, u16_t port) {
-	dhcp_in = (struct dhcp_msg*)p->payload;
-	dhcp_in_len = p->tot_len;
-	if (xSemaphoreTake(s_client_info, 0) == pdTRUE)
+	if (p->len != p->tot_len)
+		goto return_;
+
+	if (xSemaphoreTake(s_client_info, 0) == pdTRUE) {
+		dhcp_in = (struct dhcp_msg*)p->payload;
+		dhcp_in_len = p->tot_len;
 		stateManager();
+		xSemaphoreGive(s_client_info);
+	}
 
+return_:
 	pbuf_free(p);
-
-	xSemaphoreGive(s_client_info);
 }
 
+/**
+ * @brief   Run the DHCP client.
+ * @param   [in]	is_standalone	- If the client autonomous set this value to 1. If the client is managed by an external thread, set this value to 0.
+ * @param	[in]	discover_cnt	- Number of times the client must try to configure itself. This parameter is ignored if the client is managed (is_standalone == 0).
+ */
 void dhcpClientStart(uint8_t is_standalone, uint8_t discover_cnt) {
-	dhcpInit(DHCP_CLIENT_PORT, dhcpClientReceive);
+	client_state = INIT;
 	standalone = is_standalone;
 	discover_try_cnt = discover_cnt;
-
-	//constant fields
-	dhcpFillMessage(DHCP_FLD_OP, NULL);
-	dhcpFillMessage(DHCP_FLD_HTYPE, NULL);
-	dhcpFillMessage(DHCP_FLD_HLEN, NULL);
-	dhcpFillMessage(DHCP_FLD_COOKIE, NULL);
 	memcpy(network_settings.mac_addr, gnetif.hwaddr, MAC_ADDR_LEN);
 
 	if ( (s_client_info = xSemaphoreCreateBinary()) == NULL )
 		return;
 	xSemaphoreGive(s_client_info);
 
-	client_state = INIT;
+	if (dhcpInit(DHCP_CLIENT_PORT, dhcpClientReceive) == 1) {
+		vSemaphoreDelete(s_client_info);
+		return;
+	}
+
+	//constant fields
+	dhcpFillMessage(DHCP_FLD_OP, NULL);
+	dhcpFillMessage(DHCP_FLD_HTYPE, NULL);
+	dhcpFillMessage(DHCP_FLD_HLEN, NULL);
+	dhcpFillMessage(DHCP_FLD_COOKIE, NULL);
+
 	if (xTaskCreate(task_dhcpClient, "task_dhcpClient", DHCP_CLIENT_STACK_SZ, NULL, 0, &t_dhcp_client) != pdPASS)
 		return;
 }
@@ -315,6 +326,7 @@ void dhcpClientStop(void) {
 		vTaskSuspend(t_dhcp_client);
 		dhcpDeinit();
 		xSemaphoreGive(s_client_info);
+		vSemaphoreDelete(s_client_info);
 		vTaskDelete(t_dhcp_client);
 	}
 }
