@@ -12,9 +12,10 @@
 #define DHCP_NET_GATEWAY			LWIP_MAKEU32(0, 0, 0, 0)
 
 //DHCP_LEASE_TIME > DHCP_REBIND_TIME > DHCP_RENEW_TIME
-#define DHCP_LEASE_TIME				0x96000000UL //150
-#define DHCP_REBIND_TIME			0x78000000UL //120
-#define DHCP_RENEW_TIME				0x3C000000UL //60
+#define LEASE_TIME					300UL	//seconds
+#define DHCP_LEASE_TIME				PP_HTONL(LEASE_TIME)
+#define DHCP_REBIND_TIME			PP_HTONL((LEASE_TIME*3)/4)
+#define DHCP_RENEW_TIME				PP_HTONL(LEASE_TIME/2)
 
 #define DHCP_NET_ADDR				(DHCP_SERVER_IP & DHCP_NET_NETMASK)
 #define DHCP_NET_ADDR_MIN			(DHCP_NET_ADDR + 1)
@@ -27,11 +28,11 @@ typedef enum {
 	USED
 } Binding_state_t;
 
-static struct {
+typedef struct {
 	Binding_state_t state;
 	uint32_t 		ip_addr;
 	uint8_t			mac_addr[MAC_ADDR_LEN];
-} dhcp_addr_pool[DHCP_SERVER_MAX_CLIENTS];
+} DHCP_pool_t;
 
 //static struct {
 //	uint32_t ip_addr;
@@ -44,7 +45,7 @@ static struct {
 	uint8_t msg_type;
 	uint32_t requested_ip;
 	uint32_t server_ip;
-} server_options;
+} parsed_options;
 
 extern struct netif gnetif;
 
@@ -53,6 +54,7 @@ extern struct udp_pcb *dhcp_pcb;
 extern struct pbuf *dhcp_pbuf;
 //*****************************************//
 
+static DHCP_pool_t dhcp_pool[DHCP_SERVER_MAX_CLIENTS];
 static uint8_t addr_cnt = DHCP_SERVER_MAX_CLIENTS;
 static uint32_t offer_ip = 0;
 static DHCP_input_t udb_cb_buff, dhcp_in_buff;
@@ -61,31 +63,31 @@ static QueueHandle_t q_dhcp_input;
 
 
 
-inline static int8_t getPoolItemByIP(uint32_t ip_addr) {
+inline static DHCP_pool_t* getPoolItemByIP(uint32_t ip_addr) {
 	for (int ix = 0; ix < DHCP_SERVER_MAX_CLIENTS; ix++) {
-		if (dhcp_addr_pool[ix].ip_addr == ip_addr)
-			return ix;
+		if (dhcp_pool[ix].ip_addr == ip_addr)
+			return &dhcp_pool[ix];
 	}
 
-	return -1;
+	return NULL;
 }
 
-inline static uint8_t getFreeIp(void) {
+inline static DHCP_pool_t* getFreeIp(void) {
 	for (int ix = 0; ix < DHCP_SERVER_MAX_CLIENTS; ix++) {
-		if (dhcp_addr_pool[ix].state != USED)
-			return ix;
+		if (dhcp_pool[ix].state != USED)
+			return &dhcp_pool[ix];
 	}
 
-	return -1;
+	return NULL;
 }
 
-inline static int8_t isClient(uint8_t *mac_addr) {
+inline static DHCP_pool_t* isClient(uint8_t *mac_addr) {
 	for (int ix = 0; ix < DHCP_SERVER_MAX_CLIENTS; ix++) {
-		if (memcmp(dhcp_addr_pool[ix].mac_addr, mac_addr, (size_t)MAC_ADDR_LEN) == 0)
-			return ix;
+		if (memcmp(dhcp_pool[ix].mac_addr, mac_addr, (size_t)MAC_ADDR_LEN) == 0)
+			return &dhcp_pool[ix];
 	}
 
-	return -1;
+	return NULL;
 }
 
 inline static void sendMessage(uint32_t ip, uint8_t message_type) {
@@ -127,13 +129,13 @@ inline static void parseOptions(void) {
 
 		switch (opt_code) {
 			case DHCP_OPTION_MESSAGE_TYPE:
-				server_options.msg_type = *opt_data;
+				parsed_options.msg_type = *opt_data;
 			break;
 			case DHCP_OPTION_SERVER_ID:
-				memcpy(&server_options.server_ip, opt_data, opt_len);
+				memcpy(&parsed_options.server_ip, opt_data, opt_len);
 			break;
 			case DHCP_OPTION_REQUESTED_IP:
-				memcpy(&server_options.requested_ip, opt_data, opt_len);
+				memcpy(&parsed_options.requested_ip, opt_data, opt_len);
 			break;
 			default: break;
 		}
@@ -144,29 +146,35 @@ inline static void parseOptions(void) {
 }
 
 inline static void handleMessage(void) {
-	int8_t pool_item = -1;
+	DHCP_pool_t *pool_item = NULL;
 	offer_ip = 0;
 
 	parseOptions();
 
-	switch (server_options.msg_type) {
+	switch (parsed_options.msg_type) {
 		case DHCP_DISCOVER:
 			//The requested IP was found in the pool
-			if ( (server_options.requested_ip != 0) && \
-					(pool_item = getPoolItemByIP(server_options.requested_ip)) >= 0 ) {
+			if ( (parsed_options.requested_ip != 0) && \
+					(pool_item = getPoolItemByIP(parsed_options.requested_ip)) != NULL ) {
 
 					//The requested IP is free or client is the registered owner
-					if ( (dhcp_addr_pool[pool_item].state == FREE) || (memcmp(dhcp_addr_pool[pool_item].mac_addr, dhcp_in_buff.input.chaddr, MAC_ADDR_LEN) == 0) ) {
-						dhcp_addr_pool[pool_item].state = OFFERED;
-						offer_ip = dhcp_addr_pool[pool_item].ip_addr;
+					if ( (pool_item->state == FREE) || (memcmp(pool_item->mac_addr, dhcp_in_buff.input.chaddr, MAC_ADDR_LEN) == 0) ) {
+						pool_item->state = OFFERED;
+						offer_ip = pool_item->ip_addr;
 					}
+			} 
+			// Maybe client initiates new discover without requesting his previous address ?
+			else if ( (parsed_options.requested_ip == 0) && \
+						(pool_item = isClient(dhcp_in_buff.input.chaddr)) != NULL ) {
+				pool_item->state = OFFERED;
+				offer_ip = pool_item->ip_addr;
 			}
 
 			//If no IP was offered on previous check and free addresses are available
 			if ( (offer_ip == 0) && (addr_cnt > 0) ) {
 				pool_item = getFreeIp();
-				dhcp_addr_pool[pool_item].state = OFFERED;
-				offer_ip = dhcp_addr_pool[pool_item].ip_addr;
+				pool_item->state = OFFERED;
+				offer_ip = pool_item->ip_addr;
 			}
 
 			if (offer_ip != 0)
@@ -176,14 +184,13 @@ inline static void handleMessage(void) {
 		case DHCP_REQUEST:
 			//Client renewing it's lease time or validating its configuration
 			if (dhcp_in_buff.input.ciaddr.addr != 0) {
-				pool_item = getPoolItemByIP(dhcp_in_buff.input.ciaddr.addr);
-
 				//IP not found in the pool or client is not the owner
-				if ( (pool_item < 0) || (memcmp(dhcp_addr_pool[pool_item].mac_addr, dhcp_in_buff.input.chaddr, MAC_ADDR_LEN) != 0)) {
+				if ( (pool_item = getPoolItemByIP(dhcp_in_buff.input.ciaddr.addr)) == NULL || \
+						(memcmp(pool_item->mac_addr, dhcp_in_buff.input.chaddr, MAC_ADDR_LEN) != 0) ) {
 					sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_NAK);
 				} else {
-					offer_ip = dhcp_addr_pool[pool_item].ip_addr;
-					dhcp_addr_pool[pool_item].state = USED;
+					offer_ip = pool_item->ip_addr;
+					pool_item->state = USED;
 
 					//BROADCAST_FLAG -> Client restarts and tries to validate his configuration
 					//UNICAST_FLAG -> Client tries to renew it's lease time
@@ -192,14 +199,12 @@ inline static void handleMessage(void) {
 
 			//Request after an offer
 			} else {
-				pool_item = getPoolItemByIP(server_options.requested_ip);
-
-				if (pool_item < 0 || dhcp_addr_pool[pool_item].state == USED) {
+				if ( (pool_item = getPoolItemByIP(parsed_options.requested_ip)) == NULL || pool_item->state == USED ) {
 					sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_NAK);
 				} else {
-					offer_ip = dhcp_addr_pool[pool_item].ip_addr;
-					memcpy(dhcp_addr_pool[pool_item].mac_addr, dhcp_in_buff.input.chaddr, MAC_ADDR_LEN);
-					dhcp_addr_pool[pool_item].state = USED;
+					offer_ip = pool_item->ip_addr;
+					memcpy(pool_item->mac_addr, dhcp_in_buff.input.chaddr, MAC_ADDR_LEN);
+					pool_item->state = USED;
 					addr_cnt--;
 					sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_ACK);
 				}
@@ -207,9 +212,8 @@ inline static void handleMessage(void) {
 
 		break;
 		case DHCP_RELEASE:
-			pool_item = isClient(dhcp_in_buff.input.chaddr);
-			if (pool_item >= 0) {
-				dhcp_addr_pool[pool_item].state = FREE;
+			if ( (pool_item = isClient(dhcp_in_buff.input.chaddr)) != NULL ) {
+				pool_item->state = FREE;
 				addr_cnt++;
 			}
 		break;
@@ -254,7 +258,7 @@ void dhcpServerStart(void) {
 		if (ip_addr_init == DHCP_SERVER_IP)
 			ip_addr_init++;
 
-		dhcp_addr_pool[ix].ip_addr = htonl(ip_addr_init);
+		dhcp_pool[ix].ip_addr = htonl(ip_addr_init);
 		ip_addr_init++;
 	}
 

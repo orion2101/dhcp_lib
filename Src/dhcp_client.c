@@ -4,8 +4,12 @@
 #include "dhcp_client.h"
 #include "rng.h"
 
+
+/* DHCP_TRY_CNT - The number of times the client try to make requests
+ * DHCP_CLIENT_STACK_SZ - DHCP client stack size
+ */
+#define DHCP_TRY_CNT				5
 #define DHCP_CLIENT_STACK_SZ		1024
-#define DHCP_TRY_CNT				5 		//The number of times the client try to make requests
 
 
 static struct {
@@ -24,18 +28,19 @@ static struct {
 	uint32_t server_ip;
 } client_options;
 
-extern RNG_HandleTypeDef hrng;
+
 extern struct netif gnetif;
 
-//Defined in dhcp_common.c
+/* Defined in dhcp_common.c */
 extern struct udp_pcb *dhcp_pcb;
 extern struct pbuf *dhcp_pbuf;
-//*****************************************//
+/***********************************/
 
 static uint16_t dhcp_in_len;
 static struct dhcp_msg *dhcp_in;
 static uint8_t standalone;
-static uint8_t discover_try_cnt, try_cnt = DHCP_TRY_CNT;
+static uint8_t discover_try_cnt;
+static uint8_t try_cnt = DHCP_TRY_CNT;
 static uint8_t client_state;
 static uint32_t transaction_id;
 static uint32_t elapsed = 0;
@@ -170,6 +175,8 @@ inline static void stateManager(void) {
 		case RENEWING:
 			if (client_options.msg_type != DHCP_ACK) {
 				memset(&client_options, 0, sizeof(client_options));
+				dhcpFillMessage(DHCP_FLD_CIADDR, &(uint32_t){0});
+				dhcpClearOptions();
 				client_state = INIT;
 			} else {
 				elapsed = 0;
@@ -317,8 +324,11 @@ void dhcpClientStart(uint8_t is_standalone, uint8_t discover_cnt) {
 	dhcpFillMessage(DHCP_FLD_HLEN, NULL);
 	dhcpFillMessage(DHCP_FLD_COOKIE, NULL);
 
-	if (xTaskCreate(task_dhcpClient, "task_dhcpClient", DHCP_CLIENT_STACK_SZ, NULL, 0, &t_dhcp_client) != pdPASS)
+	if (xTaskCreate(task_dhcpClient, "task_dhcpClient", DHCP_CLIENT_STACK_SZ, NULL, 0, &t_dhcp_client) != pdPASS) {
+		dhcpDeinit();
+		vSemaphoreDelete(s_client_info);
 		return;
+	}
 }
 
 void dhcpClientStop(void) {
