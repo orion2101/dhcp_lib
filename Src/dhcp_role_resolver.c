@@ -12,7 +12,7 @@
 #define DHCP_TRIES_RND_MAX		15
 
 extern RNG_HandleTypeDef hrng;
-extern struct netif gnetif;
+
 static TaskHandle_t t_dhcpRoleResolver;
 
 static uint8_t getRandomInRange(uint8_t from, uint8_t to) {
@@ -45,5 +45,6 @@ static void task_dhcpRoleResolver(void *args) {
 }
 
 void dhcpRoleResolverStart(void) {
-	xTaskCreate(task_dhcpRoleResolver, "dhcpRoleResolver", DHCP_ROLE_RESOLVER_STACK_SZ, NULL, 0, &t_dhcpRoleResolver);
+	if (xTaskCreate(task_dhcpRoleResolver, "dhcpRoleResolver", DHCP_ROLE_RESOLVER_STACK_SZ, NULL, 0, &t_dhcpRoleResolver) != pdPASS)
+		return;
 }

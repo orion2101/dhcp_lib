@@ -29,8 +29,6 @@ static struct {
 } client_options;
 
 
-extern struct netif gnetif;
-
 /* Defined in dhcp_common.c */
 extern struct udp_pcb *dhcp_pcb;
 extern struct pbuf *dhcp_pbuf;
@@ -164,7 +162,7 @@ inline static void stateManager(void) {
 				network_settings.gw_addr = 0;
 				network_settings.ip_addr = dhcp_in->yiaddr.addr;
 				network_settings.netmask = client_options.subnet_mask;
-				netif_set_addr(&gnetif, (ip4_addr_t*)&network_settings.ip_addr, (ip4_addr_t*)&network_settings.netmask, (ip4_addr_t*)&network_settings.gw_addr);
+				netif_set_addr(dhcp_netif, (ip4_addr_t*)&network_settings.ip_addr, (ip4_addr_t*)&network_settings.netmask, (ip4_addr_t*)&network_settings.gw_addr);
 				elapsed = 0;
 				client_state = BOUND;
 			}
@@ -300,14 +298,15 @@ return_:
 
 /**
  * @brief   Run the DHCP client.
- * @param   [in]	is_standalone	- If the client autonomous set this value to 1. If the client is managed by an external thread, set this value to 0.
- * @param	[in]	discover_cnt	- Number of times the client must try to configure itself. This parameter is ignored if the client is managed (is_standalone == 0).
+ * @param	[in]	netif			 Pointer to the network interface on which the client should be run.
+ * @param   [in]	is_standalone	 If the client autonomous set this value to 1. If the client is managed by an external thread, set this value to 0.
+ * @param	[in]	discover_cnt	 Number of times the client must try to configure itself. This parameter is ignored if the client is managed (is_standalone == 0).
  */
 void dhcpClientStart(uint8_t is_standalone, uint8_t discover_cnt) {
 	client_state = INIT;
 	standalone = is_standalone;
 	discover_try_cnt = discover_cnt;
-	memcpy(network_settings.mac_addr, gnetif.hwaddr, MAC_ADDR_LEN);
+	memcpy(network_settings.mac_addr, dhcp_netif->hwaddr, MAC_ADDR_LEN);
 
 	if ( (s_client_info = xSemaphoreCreateBinary()) == NULL )
 		return;

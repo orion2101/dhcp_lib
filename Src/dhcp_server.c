@@ -47,7 +47,6 @@ static struct {
 	uint32_t server_ip;
 } parsed_options;
 
-extern struct netif gnetif;
 
 //Defined in dhcp_common.c
 extern struct udp_pcb *dhcp_pcb;
@@ -99,13 +98,13 @@ inline static void sendMessage(uint32_t ip, uint8_t message_type) {
 	dhcpFillMessage(DHCP_FLD_YIADDR, &offer_ip);
 	dhcpFillMessage(DHCP_FLD_CHADDR, &dhcp_in_buff.input.chaddr);
 	opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_MESSAGE_TYPE, &message_type);
-	opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_SERVER_ID, &gnetif.ip_addr);
+	opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_SERVER_ID, &dhcp_netif->ip_addr);
 
 	if (message_type != DHCP_NAK) {
 		opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_T1, &(uint32_t){DHCP_RENEW_TIME});
 		opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_T2, &(uint32_t){DHCP_REBIND_TIME});
 		opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_LEASE_TIME, &(uint32_t){DHCP_LEASE_TIME});
-		opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_SUBNET_MASK, &gnetif.netmask);
+		opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_SUBNET_MASK, &dhcp_netif->netmask);
 	}
 
 	opt_ofst += dhcpFillOption(opt_ofst, DHCP_OPTION_END, NULL);
@@ -122,10 +121,10 @@ inline static void parseOptions(void) {
 	uint8_t *opt_data = NULL;
 	uint8_t opt_code = *in_options_ptr;
 
-	while (ofst < length && opt_code != DHCP_OPTION_END) {
+	while ( (ofst < length) && (opt_code != DHCP_OPTION_END) ) {
 		opt_len = *(in_options_ptr + ofst + 1);
 		ofst += 2;
-		opt_data = in_options_ptr+ofst;
+		opt_data = in_options_ptr + ofst;
 
 		switch (opt_code) {
 			case DHCP_OPTION_MESSAGE_TYPE:
@@ -153,19 +152,15 @@ inline static void handleMessage(void) {
 
 	switch (parsed_options.msg_type) {
 		case DHCP_DISCOVER:
-			//The requested IP was found in the pool
-			if ( (parsed_options.requested_ip != 0) && \
-					(pool_item = getPoolItemByIP(parsed_options.requested_ip)) != NULL ) {
-
-					//The requested IP is free or client is the registered owner
-					if ( (pool_item->state == FREE) || (memcmp(pool_item->mac_addr, dhcp_in_buff.input.chaddr, MAC_ADDR_LEN) == 0) ) {
-						pool_item->state = OFFERED;
-						offer_ip = pool_item->ip_addr;
-					}
+			// The requested IP was found in the pool and is free or client is the registered owner
+			if ( ( (parsed_options.requested_ip != 0) && (pool_item = getPoolItemByIP(parsed_options.requested_ip)) != NULL ) && \
+				( (pool_item->state == FREE) || (memcmp(pool_item->mac_addr, dhcp_in_buff.input.chaddr, MAC_ADDR_LEN) == 0) ) ) 
+			{
+				pool_item->state = OFFERED;
+				offer_ip = pool_item->ip_addr;
 			} 
 			// Maybe client initiates new discover without requesting his previous address ?
-			else if ( (parsed_options.requested_ip == 0) && \
-						(pool_item = isClient(dhcp_in_buff.input.chaddr)) != NULL ) {
+			else if ( (parsed_options.requested_ip == 0) && (pool_item = isClient(dhcp_in_buff.input.chaddr)) != NULL ) {
 				pool_item->state = OFFERED;
 				offer_ip = pool_item->ip_addr;
 			}
@@ -186,9 +181,11 @@ inline static void handleMessage(void) {
 			if (dhcp_in_buff.input.ciaddr.addr != 0) {
 				//IP not found in the pool or client is not the owner
 				if ( (pool_item = getPoolItemByIP(dhcp_in_buff.input.ciaddr.addr)) == NULL || \
-						(memcmp(pool_item->mac_addr, dhcp_in_buff.input.chaddr, MAC_ADDR_LEN) != 0) ) {
+					(memcmp(pool_item->mac_addr, dhcp_in_buff.input.chaddr, MAC_ADDR_LEN) != 0) ) 
+				{
 					sendMessage(IP4_ADDR_BROADCAST->addr, DHCP_NAK);
-				} else {
+				}
+				else {
 					offer_ip = pool_item->ip_addr;
 					pool_item->state = USED;
 
@@ -262,7 +259,7 @@ void dhcpServerStart(void) {
 		ip_addr_init++;
 	}
 
-	netif_set_addr(&gnetif, &(ip4_addr_t){htonl(DHCP_SERVER_IP)}, &(ip4_addr_t){htonl(DHCP_NET_NETMASK)}, &(ip4_addr_t){htonl(DHCP_NET_GATEWAY)});
+	netif_set_addr(dhcp_netif, &(ip4_addr_t){htonl(DHCP_SERVER_IP)}, &(ip4_addr_t){htonl(DHCP_NET_NETMASK)}, &(ip4_addr_t){htonl(DHCP_NET_GATEWAY)});
 
 	if ( (q_dhcp_input = xQueueCreate(DHCP_INPUT_QUEUE_LEN, sizeof(DHCP_input_t))) == NULL )
 		return;

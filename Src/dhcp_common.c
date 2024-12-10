@@ -2,9 +2,11 @@
 #include "tcpip.h"
 #include "dhcp_common.h"
 
+// Reference the network interface and initialize dhcp_netif
+extern struct netif gnetif; // netif reference. Modify it as you need.
+struct netif *const dhcp_netif = &gnetif;
 
 extern RNG_HandleTypeDef hrng;
-extern struct netif gnetif;
 
 static uint8_t dhcp_role;
 static struct dhcp_msg *dhcp_out;
@@ -25,6 +27,8 @@ void dhcpClearOptions(void) {
 }
 
 uint8_t dhcpInit(uint16_t port, udp_recv_fn dhcp_recv) {
+	if (dhcp_netif == NULL) goto ret_error;
+
 	memset(dhcp_out_buff, 0, DHCP_OUT_BUFF_LEN);
 	//Allocating transmit buffer
 	if (dhcp_pbuf == NULL) {
@@ -51,7 +55,7 @@ uint8_t dhcpInit(uint16_t port, udp_recv_fn dhcp_recv) {
 		goto ret_error;
 	}
 
-	udp_bind_netif(dhcp_pcb, &gnetif);
+	udp_bind_netif(dhcp_pcb, dhcp_netif);
 	ip_set_option(dhcp_pcb, SOF_BROADCAST);
 	udp_recv(dhcp_pcb, dhcp_recv, NULL);
 
@@ -73,7 +77,7 @@ void dhcpDeinit(void) {
 	UNLOCK_TCPIP_CORE();
 }
 
-inline void dhcpFillMessage(uint8_t field, void *value) {
+inline void dhcpFillMessage(DHCP_msg_fields_t field, void *value) {
 	dhcp_out = dhcp_pbuf->payload;
 
 	switch (field) {

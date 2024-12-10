@@ -28,7 +28,7 @@ enum dhcp_role {
 	DHCP_SERVER
 };
 
-enum dhcp_msg_fields {
+typedef enum {
 	DHCP_FLD_OP = 0,
 	DHCP_FLD_HTYPE,
 	DHCP_FLD_HLEN,
@@ -45,12 +45,13 @@ enum dhcp_msg_fields {
 	DHCP_FLD_FILE,
 	DHCP_FLD_COOKIE,
 	DHCP_FLD_OPTIONS
-};
+} DHCP_msg_fields_t;
 
+extern struct netif *const dhcp_netif;
 
 uint8_t dhcpInit(uint16_t port, udp_recv_fn dhcp_recv);
 void dhcpDeinit(void);
-void dhcpFillMessage(uint8_t field, void *field_value);
+void dhcpFillMessage(DHCP_msg_fields_t field, void *field_value);
 uint8_t dhcpFillOption(uint8_t offset, uint8_t opt_code, uint8_t *opt_val);
 uint32_t dhcpGenerateUint32(void);
 void dhcpClearOptions(void);
