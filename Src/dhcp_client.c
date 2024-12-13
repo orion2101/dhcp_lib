@@ -2,14 +2,8 @@
 #include "ethernet.h"
 #include "dhcp_common.h"
 #include "dhcp_client.h"
+#include "dhcp_config.h"
 #include "rng.h"
-
-
-/* DHCP_TRY_CNT - The number of times the client try to make requests
- * DHCP_CLIENT_STACK_SZ - DHCP client stack size
- */
-#define DHCP_TRY_CNT				5
-#define DHCP_CLIENT_STACK_SZ		1024
 
 
 static struct {

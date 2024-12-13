@@ -5,8 +5,6 @@
 extern "C" {
 #endif
 
-#define DHCP_RESPONSE_TIMEOUT_MS		2000 //The time slice between client status checks
-
 enum client_states {
 	UNDEFINED = -1,
 	INIT = 0,
@@ -24,6 +22,7 @@ typedef struct {
 	uint8_t discover_cnt;
 } DHCP_client_info;
 
+
 DHCP_client_info dhcpClientGetInfo(void);
 void dhcpClientStart(uint8_t is_standalone, uint8_t discover_cnt);
 void dhcpClientStop(void);
@@ -32,4 +31,4 @@ void dhcpClientStop(void);
 }
 #endif
 
-#endif
+#endif /* DHCP_CLIENT_H */

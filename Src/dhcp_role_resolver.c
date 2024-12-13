@@ -1,19 +1,14 @@
 #include "rng.h"
 #include "FreeRTOS.h"
 #include "task.h"
+#include "dhcp_config.h"
 #include "dhcp_server.h"
 #include "dhcp_client.h"
 
 
-#define DHCP_ROLE_RESOLVER_DELAY_MS		DHCP_RESPONSE_TIMEOUT_MS
-#define DHCP_ROLE_RESOLVER_STACK_SZ		256
-
-#define DHCP_TRIES_RND_MIN		1
-#define DHCP_TRIES_RND_MAX		15
-
 extern RNG_HandleTypeDef hrng;
-
 static TaskHandle_t t_dhcpRoleResolver;
+
 
 static uint8_t getRandomInRange(uint8_t from, uint8_t to) {
 	uint32_t random = 0;

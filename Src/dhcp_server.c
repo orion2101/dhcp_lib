@@ -1,25 +1,7 @@
 #include "dhcp_common.h"
 #include "dhcp_server.h"
 #include "ethernet.h"
-
-
-#define DHCP_SERVER_MAX_CLIENTS		5
-#define DHCP_INPUT_QUEUE_LEN		DHCP_SERVER_MAX_CLIENTS
-
-//network alignment is big-endian
-#define DHCP_SERVER_IP 				LWIP_MAKEU32(192, 168, 0, 1)
-#define DHCP_NET_NETMASK			LWIP_MAKEU32(255, 255, 255, 0)
-#define DHCP_NET_GATEWAY			LWIP_MAKEU32(0, 0, 0, 0)
-
-//DHCP_LEASE_TIME > DHCP_REBIND_TIME > DHCP_RENEW_TIME
-#define LEASE_TIME					300UL	//seconds
-#define DHCP_LEASE_TIME				PP_HTONL(LEASE_TIME)
-#define DHCP_REBIND_TIME			PP_HTONL((LEASE_TIME*3)/4)
-#define DHCP_RENEW_TIME				PP_HTONL(LEASE_TIME/2)
-
-#define DHCP_NET_ADDR				(DHCP_SERVER_IP & DHCP_NET_NETMASK)
-#define DHCP_NET_ADDR_MIN			(DHCP_NET_ADDR + 1)
-#define DHCP_NET_ADDR_BRD			(DHCP_NET_ADDR | ~DHCP_NET_NETMASK)
+#include "dhcp_config.h"
 
 
 typedef enum {

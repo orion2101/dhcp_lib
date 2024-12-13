@@ -1,9 +1,6 @@
 #ifndef DHCP_COMMON_H
 #define DHCP_COMMON_H
 
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #include "lwip/prot/dhcp.h"
 #include "lwip/udp.h"
@@ -17,16 +14,22 @@ extern "C" {
 
 #define DHCP_OUT_BUFF_LEN	LWIP_MEM_ALIGN_SIZE(DHCP_OPTIONS_OFS + DHCP_OPTIONS_LEN)
 
-typedef struct {
-	uint16_t length;
-	uint32_t src;
-	struct dhcp_msg input;
-} DHCP_input_t;
+extern struct netif *const dhcp_netif;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 enum dhcp_role {
 	DHCP_CLIENT = 0,
 	DHCP_SERVER
 };
+
+typedef struct {
+	uint16_t length;
+	uint32_t src;
+	struct dhcp_msg input;
+} DHCP_input_t;
 
 typedef enum {
 	DHCP_FLD_OP = 0,
@@ -47,7 +50,6 @@ typedef enum {
 	DHCP_FLD_OPTIONS
 } DHCP_msg_fields_t;
 
-extern struct netif *const dhcp_netif;
 
 uint8_t dhcpInit(uint16_t port, udp_recv_fn dhcp_recv);
 void dhcpDeinit(void);
